@@ -1,0 +1,46 @@
+
+#pragma once
+
+
+static float fixed_radius2 = 1.9;
+static float min_radius2 = .5;
+static float folding_limit = 1.0;
+static float scale = -2.6;
+
+void sphere_fold(inout vec3 z, inout float dz)
+{
+    float r2 = dot(z, z);
+    if(r2 < min_radius2)
+    {
+        float temp = (fixed_radius2 / min_radius2);
+        z *= temp;
+        dz *= temp;
+    }
+    else if(r2 < fixed_radius2)
+    {
+        float temp = (fixed_radius2 / r2);
+        z *= temp;
+        dz *= temp;
+    }
+}
+
+void box_fold(inout vec3 z, inout float dz)
+{
+    z = clamp(z, -folding_limit, folding_limit) * 2.0 - z;
+}
+
+float mapMandelBox(vec3 z)
+{
+    vec3 offset = z;
+    float dr = 1.0;
+    for(int n = 0; n < 10; ++n)
+    {
+        box_fold(z, dr);
+        sphere_fold(z, dr);
+
+        z = scale * z + offset;
+        dr = dr * abs(scale) + 1.0;
+    }
+    float r = length(z);
+    return r / abs(dr);
+}
