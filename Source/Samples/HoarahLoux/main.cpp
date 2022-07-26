@@ -3,8 +3,8 @@
 
 #define MAX_PASSES 4
 #define MAX_CONTROLLABLE_VARS 5
-#define FBO_WIDTH 1280
-#define FBO_HEIGHT 720
+#define DEFAULT_WIDTH 1280
+#define DEFAULT_HEIGHT 720
 
 ShaderEditor::~ShaderEditor()
 {
@@ -47,6 +47,23 @@ void ShaderEditor::resetCamera()
         camera->setDepthRange(nearZ, farZ);
     }
 }
+
+void ShaderEditor::createFbos(uint32_t width, uint32_t height)
+{
+    // create fbo for each pass
+    const ResourceFormat depthFormat = ResourceFormat::D32Float;
+    const ResourceFormat colorFormat = ResourceFormat::RGBA32Float;  // pathtracer needs this precision to accumulate color
+    Fbo::Desc fboDesc;
+    fboDesc.setDepthStencilTarget(depthFormat);
+    fboDesc.setColorTarget(0, colorFormat);
+    uint32_t mipLevels = Texture::kMaxPossible;
+
+    for (int i = 0; i < MAX_PASSES; ++i)
+    {
+        mPasses[i].mFbo = Fbo::create2D(width, height, fboDesc, 1, mipLevels);
+    }
+}
+
 void ShaderEditor::onLoad(RenderContext* pRenderContext)
 {
     // create rasterizer state
@@ -69,24 +86,14 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    mPasses[0].mPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/Pathtracer.slang");
-    mPasses[0].mShaderPath = "Samples/HoarahLoux/Shaders/Pathtracer.slang";
+    mPasses[0].mPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/BurningShip.slang");
+    mPasses[0].mShaderPath = "Samples/HoarahLoux/Shaders/BurningShip.slang";
 
     mPasses[1].mPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/PathtracerPost.slang");
     mPasses[1].mShaderPath = "Samples/HoarahLoux/Shaders/PathtracerPost.slang";
 
-    // create fbo for each pass
-    const ResourceFormat depthFormat = ResourceFormat::D32Float;
-    const ResourceFormat colorFormat = ResourceFormat::RGBA32Float;  // pathtracer needs this precision to accumulate color
-    Fbo::Desc fboDesc;
-    fboDesc.setDepthStencilTarget(depthFormat);
-    fboDesc.setColorTarget(0, colorFormat);
-    uint32_t mipLevels = Texture::kMaxPossible;
 
-    for (int i = 0; i < MAX_PASSES; ++i)
-    {
-        mPasses[i].mFbo = Fbo::create2D(FBO_WIDTH, FBO_HEIGHT, fboDesc, 1, mipLevels);
-    }
+    createFbos(DEFAULT_WIDTH, DEFAULT_HEIGHT);
 
     // shader constants that can be tweaked through gui
     mControllableVars.resize(MAX_CONTROLLABLE_VARS);
@@ -160,6 +167,11 @@ void ShaderEditor::setCommonVars(FullScreenPass::SharedPtr& pass, float w, float
     if (pass["ToyCB"].findMember("RayTarget").isValid())
     {
         pass["ToyCB"]["RayTarget"] = mCameras[0]->getTarget();
+    }
+
+    if (pass["ToyCB"].findMember("UpVector").isValid())
+    {
+        pass["ToyCB"]["UpVector"] = mCameras[0]->getUpVector();
     }
 
 
@@ -275,6 +287,16 @@ void ShaderEditor::onGuiRender(Gui* pGui)
         std::string camPosStr = "CamPos: " + std::to_string(camPos.x) + ", " +
             std::to_string(camPos.y) + ", " + std::to_string(camPos.z);
         w.text(camPosStr, false);
+
+        float3 camTarget = mCameras[0]->getTarget();
+        std::string camTargetStr = "CamTarget: " + std::to_string(camTarget.x) + ", " +
+            std::to_string(camTarget.y) + ", " + std::to_string(camTarget.z);
+        w.text(camTargetStr, false);
+
+        float3 camUp = mCameras[0]->getUpVector();
+        std::string camUpStr = "CamUp: " + std::to_string(camUp.x) + ", " +
+            std::to_string(camUp.y) + ", " + std::to_string(camUp.z);
+        w.text(camUpStr, false);
     }
 
     // passes
@@ -394,6 +416,8 @@ bool ShaderEditor::onMouseEvent(const MouseEvent& mouseEvent)
 void ShaderEditor::onResizeSwapChain(uint32_t width, uint32_t height)
 {
     mAspectRatio = (float(width) / float(height));
+
+    createFbos(width, height);
 }
 
 #ifdef _WIN32
@@ -404,8 +428,8 @@ int main(int argc, char** argv)
 {
     ShaderEditor::UniquePtr pRenderer = std::make_unique<ShaderEditor>();
     SampleConfig config;
-    config.windowDesc.width = 1280;
-    config.windowDesc.height = 720;
+    config.windowDesc.width = DEFAULT_WIDTH;
+    config.windowDesc.height = DEFAULT_HEIGHT;
     config.deviceDesc.enableVsync = true;
     config.windowDesc.resizableWindow = true;
     config.windowDesc.title = "ShaderEditor";

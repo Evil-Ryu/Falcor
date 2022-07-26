@@ -2,8 +2,6 @@
 
 #include "Include/GLSLDefines.slangh"
 
-
-
 cbuffer ToyCB
 {
     float2 iResolution;
@@ -14,49 +12,24 @@ cbuffer ToyCB
 
     float3 RayOrigin;
     float3 RayTarget;
+    float3 UpVector;
 };
 
 layout(binding = 0) SamplerState iChannel0Sampler : register(s0);
 layout(binding = 1) texture2D iPass0Output : register(t0);
 
 #define MAX_BOUNCES 5
-#define INTER_THRESHOLD .001
+#define INTER_THRESHOLD .0001
 #define PI 3.1415926535
 #define EPSILON 			0.0001 
 
 
 #include "Include/SDF-MandelBox.slangh"
-
+//#include "Include/SDF-BurningShip3D.slangh"
+#include "Include/Randoms.slangh"
 
 static float seed;
 
-float hash11(float p)
-{
-    vec2 p2 = fract(vec2(p * 5.3983, p * 5.4427));
-    p2 += dot(p2.yx, p2.xy + vec2(21.5351, 14.3137));
-    return fract(p2.x * p2.y * 95.4337);
-}
-
-float hash12(vec2 p)
-{
-	p  = fract(p * vec2(5.3983, 5.4427));
-    p += dot(p.yx, p.xy + vec2(21.5351, 14.3137));
-	return fract(p.x * p.y * 95.4337);
-}
-
-vec3 hash31(float p)
-{
-    vec3 p2 = fract(p * vec3(5.3983, 5.4427, 6.9371));
-    p2 += dot(p2.yzx, p2.xyz + vec3(21.5351, 14.3137, 15.3219));
-    return fract(vec3(p2.x * p2.z * 95.4337, p2.x * p2.y * 97.597, p2.y * p2.z * 93.8365));
-}
-
-vec2 hash21(float p)
-{
-    vec2 p2 = fract(p * vec2(5.3983, 5.4427));
-    p2 += dot(p2.yx, p2.xy + vec2(21.5351, 14.3137));
-    return fract(vec2(p2.x * p2.y * 95.4337, p2.x * p2.y * 97.597));
-}
 
 vec3 ortho(vec3 v)
 {
@@ -75,6 +48,12 @@ vec3 getHemisphereSampleCosWeighted(vec3 dir, float power)
     r.y = pow(r.y, 1.0 / (power + 1.0));
     float oneminus = sqrt(1.0 - r.y * r.y);
     return cos(r.x) * oneminus * o1 + sin(r.x) * oneminus * o2 + r.y * dir;
+}
+
+vec3 getHemisphereSampleCosWeighted(vec3 n)
+{
+    vec3 rnd = hash31(seed++);
+    return normalize(n + rnd);
 }
 
 // sample propotional to a cone centered at the normal
@@ -173,7 +152,7 @@ PhongMaterial getPhongMaterial(float id)
 
     if (id == 0.)
     {
-        mat.albedo = vec3(1., .2, .1);
+        mat.albedo = vec3(.99, .99, .99);
         mat.specularCol = vec3(1);
         mat.roughness = .9;
     }
@@ -181,19 +160,19 @@ PhongMaterial getPhongMaterial(float id)
     {
         mat.albedo = vec3(.2, 1., .1);
         mat.specularCol = vec3(1);
-        mat.roughness = 0.3;
+        mat.roughness = 0.2;
+        mat.shininess = 64.;
     }
     else if (id == 2.)
     {
         mat.albedo = vec3(.8);
         mat.specularCol = vec3(1);
+        mat.roughness = 0.5;
+        mat.shininess = 64.;
     }
     return mat;
 }
 
-vec3 rndunit(float s) {
-    return normalize(tan(hash31(s)));
-}
 
 float sdBox(vec3 p, vec3 b)
 {
@@ -203,14 +182,15 @@ float sdBox(vec3 p, vec3 b)
 
 vec2 map(vec3 p)
 {
+    //float d1 = mapBurningShip(p, 2.);//mapMandelBox(p+vec3(1., -1.5, 0.));
     float d1 = mapMandelBox(p+vec3(1., -1.5, 0.));
     float d2 = length(p+vec3(-1.,0.,0.)) - 1.;
     float d3 = abs(p.y + .9);
     float d = d1;
     float id = 0.;
 
-    if (d2 < d) { d = d2; id = 1.; }
-    if (d3 < d) { d = d3; id = 2.; }
+   // if (d2 < d) { d = d2; id = 1.; }
+    //if (d3 < d) { d = d3; id = 2.; }
 
     return vec2(d, id);
 }
@@ -250,7 +230,7 @@ vec2 intersect(vec3 ro, vec3 rd, float dist)
 //static float sunSize = 0.53; //degree
 static float sunSize = 10.;
 static float sunAngularDiameterCos = cos(sunSize * PI / 180.0);
-static vec3 sunCol = vec3(1.1, .8, .5);
+static vec3 sunCol = vec3(1.1, .8, .5) * 5.;
 static vec3 skyCol = vec3(0.1, .5, 1.);
 static vec3 sunDir = normalize(vec3(1., 1., -1.));
 
@@ -295,7 +275,8 @@ vec4 sampleBrdf(vec3 fromEye, vec3 pos, vec3 normal, float matid, out vec3 rd, o
 
     if (rnd > mat.roughness)
     {
-        rd = normalize(getHemisphereSampleCosWeighted(normal, 1.));
+        //rd = normalize(getHemisphereSampleCosWeighted(normal, 1.));
+        rd = normalize(getHemisphereSampleCosWeighted(normal));
         pdf = max(0., dot(rd, normal)) / PI;
     }
     else
@@ -346,7 +327,7 @@ vec3 getDirectLighting(vec3 fromEye, vec3 pos, vec3 normal, float matid, out vec
 
 vec3 getAlbedo(float id)
 {
-    if (id == 0.) { return vec3(1., 0.1, 0.1); }
+    if (id == 0.) { return vec3(.9, .9, .9); }
     else if (id == 1.) { return vec3(0.1, 1., 0.1); }
     else if (id == 2.) { return vec3(.5); }
     return vec3(0);
@@ -419,11 +400,12 @@ vec4 mainImage(vec2 fragCoord)
 
     // note falcor's camera is right handed, so we need reverse x
     vec3 ro = vec3(RayOrigin.x, RayOrigin.y, RayOrigin.z);
-    vec3 ta = RayTarget;
+    vec3 ta = vec3(RayTarget.x, RayTarget.y, RayTarget.z);
 
     vec3 forward = normalize(ta - ro);
-    vec3 right = normalize(cross(vec3(0, 1, 0), forward));
-    vec3 up = normalize(cross(forward, right));
+    //vec3 right = normalize(cross(vec3(0, 1, 0), forward));
+    vec3 right = normalize(cross(forward, UpVector));
+    vec3 up = normalize(cross(right, forward));
 
     vec3 rd = normalize(p.x * right + p.y * up + 1.8 * forward);
 

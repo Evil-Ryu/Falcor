@@ -67,5 +67,5 @@ private:
     void executeBlitPass(RenderContext* pRenderContext, Texture::SharedPtr srcTexture, Fbo::SharedPtr dstFbo);
     void executeClearPass(RenderContext* pRenderContext, Fbo::SharedPtr Fbo);
     void resetCamera();
-
+    void createFbos(uint32_t width, uint32_t height);
 };
