@@ -1,0 +1,46 @@
+#pragma once
+
+
+#include "GLSLDefines.slangh"
+
+
+// standard phong brdf
+// kd*(1./pi) + ks*((n+2)/2pi * (reflect * eye)^n
+struct PhongMaterial
+{
+    vec3 albedo;
+    vec3 specularCol;
+    float shininess;
+    float roughness;
+    float F0;
+};
+
+// for dielectric
+float schlickFresnel(float F0, float lightDotHalf)
+{
+    return F0 + (1. - F0) * pow(1.0 - lightDotHalf, 5.);
+}
+
+// for metal
+vec3 schlickFresnel(vec3 F0, float lightDotHalf)
+{
+    return F0 + (1. - F0) * pow(1.0 - lightDotHalf, 5.);
+}
+
+vec3 phongBrdf(vec3 toLight, vec3 toEye, vec3 normal, vec3 pos, PhongMaterial mat)
+{
+    vec3 wr = reflect(-toLight, normal);
+    vec3 wh = normalize(toLight + toEye);
+
+    float F = schlickFresnel(mat.F0, max(0., dot(toLight, wh)));
+
+    float diff = (1. - F) * 1. / PI;
+    float spec = F * ((mat.shininess + 2.) / (2. * PI)) *
+        pow(max(0., dot(wr, toEye)), mat.shininess);
+
+
+    vec3 diff_refl = diff * mat.albedo;
+    vec3 spec_refl = spec * mat.specularCol;
+
+    return mix(spec_refl, diff_refl, mat.roughness);
+}

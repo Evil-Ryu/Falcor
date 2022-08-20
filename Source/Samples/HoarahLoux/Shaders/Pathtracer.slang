@@ -27,119 +27,12 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 #include "Include/SDF-MandelBox.slangh"
 //#include "Include/SDF-BurningShip3D.slangh"
 #include "Include/Randoms.slangh"
+#include "Include/Sampling.slangh"
+#include "Include/Materials.slangh"
+#include "Include/SDF-BasicShapes.slangh"
+
 
 static float seed;
-
-
-vec3 ortho(vec3 v)
-{
-    return abs(v.x) > abs(v.z) ? vec3(-v.y, v.x, 0.0) : vec3(0.0, -v.z, v.y);
-}
-
-
-// pdf = costheta / pi
-vec3 getHemisphereSampleCosWeighted(vec3 dir, float power)
-{
-    dir = normalize(dir);
-    vec3 o1 = normalize(ortho(dir));
-    vec3 o2 = normalize(cross(dir, o1));
-    vec2 r = hash21(seed++);
-    r.x = r.x * 2. * PI;
-    r.y = pow(r.y, 1.0 / (power + 1.0));
-    float oneminus = sqrt(1.0 - r.y * r.y);
-    return cos(r.x) * oneminus * o1 + sin(r.x) * oneminus * o2 + r.y * dir;
-}
-
-vec3 getHemisphereSampleCosWeighted(vec3 n)
-{
-    vec3 rnd = hash31(seed++);
-    return normalize(n + rnd);
-}
-
-// sample propotional to a cone centered at the normal
-// extent = 1 - costheta
-// theta is the radian angel of the cone
-// pdf = 1 / (2pi * (1-costheta))
-vec3 getConeSample(vec3 dir, float extent)
-{
-    // Create orthogonal vector (fails for z,y = 0)
-    dir = normalize(dir);
-    vec3 o1 = normalize(ortho(dir));
-    vec3 o2 = normalize(cross(dir, o1));
-
-    vec2 r = hash21(seed++);
-
-    r.x = r.x * 2. * PI;
-    r.y = 1.0 - r.y * extent;
-
-    float oneminus = sqrt(1.0 - r.y * r.y);
-    return cos(r.x) * oneminus * o1 + sin(r.x) * oneminus * o2 + r.y * dir;
-}
-
-
-// formula 36, sample proportional to cosine lobe around dir
-// power is the power of cos
-// pdf = (n + 1) / 2pi * cos^n
-vec3 getConeSampleCosWeighted(vec3 dir, float power)
-{
-    dir = normalize(dir);
-    vec3 o1 = normalize(ortho(dir));
-    vec3 o2 = normalize(cross(dir, o1));
-
-    vec2 r = hash21(seed++);
-
-    r.x = 2. * PI * r.x;
-    r.y = 1.0 - pow(r.y, 1. / (power + 1.));
-
-    float oneminus = sqrt(1.0 - r.y * r.y);
-    return cos(r.x) * oneminus * o1 + sin(r.x) * oneminus * o2 + r.y * dir;
-}
-
-vec3 getPhoneSpecularSample(vec3 dir, float power)
-{
-    return getConeSampleCosWeighted(dir, power);
-}
-
-// for dielectric
-float schlickFresnel(float F0, float lightDotHalf)
-{
-    return F0 + (1. - F0) * pow(1.0 - lightDotHalf, 5.);
-}
-
-// for metal
-vec3 schlickFresnel(vec3 F0, float lightDotHalf)
-{
-    return F0 + (1. - F0) * pow(1.0 - lightDotHalf, 5.);
-}
-
-// standard phong brdf
-// kd*(1./pi) + ks*((n+2)/2pi * (reflect * eye)^n
-struct PhongMaterial
-{
-    vec3 albedo;
-    vec3 specularCol;
-    float shininess;
-    float roughness;
-    float F0;
-};
-
-vec3 phongBrdf(vec3 toLight, vec3 toEye, vec3 normal, vec3 pos, PhongMaterial mat)
-{
-    vec3 wr = reflect(-toLight, normal);
-    vec3 wh = normalize(toLight + toEye);
-
-    float F = schlickFresnel(mat.F0, max(0., dot(toLight, wh)));
-
-    float diff = (1. - F) * 1. / PI;
-    float spec = F * ((mat.shininess + 2.) / (2. * PI)) *
-        pow(max(0., dot(wr, toEye)), mat.shininess);
-
-
-    vec3 diff_refl = diff * mat.albedo;
-    vec3 spec_refl = spec * mat.specularCol;
-
-    return mix(spec_refl, diff_refl, mat.roughness);
-}
 
 PhongMaterial getPhongMaterial(float id)
 {
@@ -174,11 +67,6 @@ PhongMaterial getPhongMaterial(float id)
 }
 
 
-float sdBox(vec3 p, vec3 b)
-{
-    vec3 d = abs(p) - b;
-    return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));
-}
 
 vec2 map(vec3 p)
 {
@@ -235,12 +123,6 @@ static vec3 skyCol = vec3(0.1, .5, 1.);
 static vec3 sunDir = normalize(vec3(1., 1., -1.));
 
 
-// NEE with MIS
-float misWeight(float a, float b)
-{
-    return a*a / (a*a + b*b);
-}
-
 vec4 sampleLight(vec3 fromEye, vec3 pos, vec3 normal, float matid)
 {
     vec3 col = vec3(0);
@@ -275,13 +157,13 @@ vec4 sampleBrdf(vec3 fromEye, vec3 pos, vec3 normal, float matid, out vec3 rd, o
 
     if (rnd > mat.roughness)
     {
-        //rd = normalize(getHemisphereSampleCosWeighted(normal, 1.));
-        rd = normalize(getHemisphereSampleCosWeighted(normal));
+        //rd = normalize(getHemisphereSampleCosWeighted(normal, 1.), seed);
+        rd = normalize(getHemisphereSampleCosWeighted(normal, seed));
         pdf = max(0., dot(rd, normal)) / PI;
     }
     else
     {
-        rd = getPhoneSpecularSample(reflect(fromEye, normal), mat.shininess);
+        rd = getPhoneSpecularSample(reflect(fromEye, normal), mat.shininess, seed);
         pdf = (mat.shininess + 1.) / (2.*PI) * pow(max(0., dot(rd, normal)), mat.shininess);
     }
 
@@ -312,7 +194,7 @@ vec4 sampleBrdf(vec3 fromEye, vec3 pos, vec3 normal, float matid, out vec3 rd, o
     return vec4(col, pdf);
 }
 
-vec3 getDirectLighting(vec3 fromEye, vec3 pos, vec3 normal, float matid, out vec3 rd, out vec3 brdf, out float brdfPdf, out bool hit)
+vec3 getDirectLightingMIS(vec3 fromEye, vec3 pos, vec3 normal, float matid, out vec3 rd, out vec3 brdf, out float brdfPdf, out bool hit)
 {
     vec4 res1 = sampleLight(fromEye, pos, normal, matid);
     vec4 res2 = sampleBrdf(fromEye, pos, normal, matid, rd, brdf, hit);
@@ -366,7 +248,7 @@ vec3 scene(vec3 ro, vec3 rd)
         bool hit;
         // direct part, NEE, use MIS to optimize
         // returns the new rd for the next event and the brdf of the inirect part
-        vec3 direct = getDirectLighting(ord, pos, n, res.y, rd, brdf, brdfPdf, hit);
+        vec3 direct = getDirectLightingMIS(ord, pos, n, res.y, rd, brdf, brdfPdf, hit);
 
         // pathWeight = A0C0..An-1Cn-1,  direct = AnCnLn
         Lo += pathWeight * direct;
