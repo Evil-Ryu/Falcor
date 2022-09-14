@@ -1,78 +1,165 @@
 #pragma once
 
+#include "CommonDefines.slangh"
 #include "GLSLDefines.slangh"
 #include "Randoms.slangh"
 
 
-#define PI 3.1415926535
+// Notation
+
+// E = Random sample for BRDF.
+// N = Normal of the macro surface.
+// H = Normal of the micro surface.
+// V = View vector going from surface's position towards the view's origin.
+// L = Light ray direction
+
+// D = Microfacet NDF
+// G = Shadowing and masking
+// F = Fresnel
+
+// Vis = G / (4*NoL*NoV)
+// f = Microfacet specular BRDF = D*G*F / (4*NoL*NoV) = D*Vis*F
+
+
+// [ Duff et al. 2017, "Building an Orthonormal Basis, Revisited" ]
+// Discontinuity at TangentZ.z == 0
+float3x3 GetTangentBasis( vec3 TangentZ )
+{
+	const float Sign = TangentZ.z >= 0 ? 1 : -1;
+	const float a = -1. / ( Sign + TangentZ.z );
+	const float b = TangentZ.x * TangentZ.y * a;
+	
+	vec3 TangentX = { 1 + Sign * a * pow( TangentZ.x, 2. ), Sign * b, -Sign * TangentZ.x };
+	vec3 TangentY = { b,  Sign + a * pow( TangentZ.y, 2. ), -TangentZ.y };
+
+	return float3x3( TangentX, TangentY, TangentZ );
+}
+
+// be conservative since the GPU may be aggressive with floating point optimizations
+#define GGX_MIN_ROUGHNESS 0.01
+#define GGX_MIN_ANISOTROPY 0.001 // ignore anisotropy below this amount
+
+float3x3 GetGGXBasis(float Roughness, float Anisotropy, vec3 WorldNormal, vec3 WorldTangent, out float2 Alpha)
+{
+    Roughness = max(Roughness, GGX_MIN_ROUGHNESS);
+    float3x3 Basis;
+
+    if (abs(Anisotropy) >= GGX_MIN_ANISOTROPY)
+    {
+        // Material is anisotropic, our shading frame should use the tangent vector
+
+        float R2 = Roughness * Roughness;
+        Alpha.x = max(R2 * (1.0 + Anisotropy), 0.001f);
+        Alpha.y = max(R2 * (1.0 - Anisotropy), 0.001f);
+
+        vec3 X = WorldTangent;
+        vec3 Y = normalize(cross(WorldNormal, X));
+        Basis = float3x3(cross(Y, WorldNormal), Y, WorldNormal);
+    }
+    else
+    {
+        // No anisotropy, just pick an arbitrary basis
+        Alpha = Roughness * Roughness;
+        Basis = GetTangentBasis(WorldNormal);
+    }
+    return Basis;
+}
+
+// Based on each matrix row is a tangent axis
+float3 tangentToWorld(vec3 v, vec3 tangentZ)
+{
+    return mul(v, GetTangentBasis(tangentZ));
+}
+
+float3 tangentToWorld(vec3 v, float3x3 tangentBasis)
+{
+    return mul(v, tangentBasis);
+}
+
+float3 worldToTangent(vec3 v, vec3 tangentZ)
+{
+    return mul(GetTangentBasis(tangentZ), v);
+}
+
+float3 worldToTangent(vec3 v, float3x3 tangentBasis)
+{
+    return mul(tangentBasis, v);
+}
+
+
 
 vec3 ortho(vec3 v)
 {
     return abs(v.x) > abs(v.z) ? vec3(-v.y, v.x, 0.0) : vec3(0.0, -v.z, v.y);
 }
 
+vec2 UniformSampleDisk(vec2 E)
+{
+    float Theta = 2 * PI * E.x;
+    float Radius = sqrt(E.y);
+    return Radius * vec2(cos(Theta), sin(Theta));
+}
 
 // pdf = costheta / pi
-vec3 getHemisphereSampleCosWeighted(vec3 dir, float power, inout float seed)
+vec3 getHemisphereSampleCosWeighted(vec3 dir, vec2 randSample, float power = 1.)
 {
     dir = normalize(dir);
     vec3 o1 = normalize(ortho(dir));
     vec3 o2 = normalize(cross(dir, o1));
-    vec2 r = hash21(seed++);
-    r.x = r.x * 2. * PI;
-    r.y = pow(r.y, 1.0 / (power + 1.0));
-    float oneminus = sqrt(1.0 - r.y * r.y);
-    return cos(r.x) * oneminus * o1 + sin(r.x) * oneminus * o2 + r.y * dir;
+    randSample.x = randSample.x * 2. * PI;
+    randSample.y = pow(randSample.y, 1.0 / (power + 1.0));
+    float oneminus = sqrt(1.0 - randSample.y * randSample.y);
+    return cos(randSample.x) * oneminus * o1 + sin(randSample.x) * oneminus * o2 + randSample.y * dir;
 }
 
-vec3 getHemisphereSampleCosWeighted(vec3 n, inout float seed)
+vec3 getHemisphereSampleCosWeightedFast(vec3 n, vec3 randSample)
 {
-    vec3 rnd = hash31(seed++);
-    return normalize(n + rnd);
+    return normalize(n + randSample);
 }
 
 // sample propotional to a cone centered at the normal
 // extent = 1 - costheta
 // theta is the radian angel of the cone
 // pdf = 1 / (2pi * (1-costheta))
-vec3 getConeSample(vec3 dir, float extent, inout float seed)
+vec3 getConeSample(vec3 dir, float extent, vec2 randSample)
 {
     // Create orthogonal vector (fails for z,y = 0)
     dir = normalize(dir);
     vec3 o1 = normalize(ortho(dir));
     vec3 o2 = normalize(cross(dir, o1));
 
-    vec2 r = hash21(seed++);
+    randSample.x = randSample.x * 2. * PI;
+    randSample.y = 1.0 - randSample.y * extent;
 
-    r.x = r.x * 2. * PI;
-    r.y = 1.0 - r.y * extent;
-
-    float oneminus = sqrt(1.0 - r.y * r.y);
-    return cos(r.x) * oneminus * o1 + sin(r.x) * oneminus * o2 + r.y * dir;
+    float oneminus = sqrt(1.0 - randSample.y * randSample.y);
+    return cos(randSample.x) * oneminus * o1 + sin(randSample.x) * oneminus * o2 + randSample.y * dir;
 }
 
 
 // formula 36, sample proportional to cosine lobe around dir
 // power is the power of cos
 // pdf = (n + 1) / 2pi * cos^n
-vec3 getConeSampleCosWeighted(vec3 dir, float power, inout float seed)
+vec3 getConeSampleCosWeighted(vec3 dir, float power, vec2 randSample)
 {
     dir = normalize(dir);
     vec3 o1 = normalize(ortho(dir));
     vec3 o2 = normalize(cross(dir, o1));
 
-    vec2 r = hash21(seed++);
+    randSample.x = 2. * PI * randSample.x;
+    randSample.y = 1.0 - pow(randSample.y, 1. / (power + 1.));
 
-    r.x = 2. * PI * r.x;
-    r.y = 1.0 - pow(r.y, 1. / (power + 1.));
-
-    float oneminus = sqrt(1.0 - r.y * r.y);
-    return cos(r.x) * oneminus * o1 + sin(r.x) * oneminus * o2 + r.y * dir;
+    float oneminus = sqrt(1.0 - randSample.y * randSample.y);
+    return cos(randSample.x) * oneminus * o1 + sin(randSample.x) * oneminus * o2 + randSample.y * dir;
 }
 
 vec3 getPhoneSpecularSample(vec3 dir, float power, inout float seed)
 {
     return getConeSampleCosWeighted(dir, power, seed);
+}
+
+float getPhongSpecularPdf(float shininess, vec3 worldNormal, vec3 worldRefl)
+{
+    return (shininess + 1.) / (2. * PI) * pow(max(0., dot(worldRefl, worldNormal)), shininess);
 }
 
 
@@ -81,4 +168,205 @@ vec3 getPhoneSpecularSample(vec3 dir, float power, inout float seed)
 float misWeight(float a, float b)
 {
     return a*a / (a*a + b*b);
+}
+
+// Multiple importance sampling power heuristic of two functions with a power of two. 
+float MISWeightRobust(float Pdf, float OtherPdf) {
+	// The straightforward implementation above is prone to numerical overflow and divisions by 0
+	// and does not work well with +inf inputs.
+
+	// We want this function to have the following properties:
+	//  0 <= w(a,b) <= 1 for all possible positive floats a and b (including 0 and +inf)
+	//  w(a, b) + w(b, a) == 1.0
+	
+	// The formulation below is much more stable across the range of all possible inputs
+	// and guarantees the sum always adds up to 1.0.
+
+	if (Pdf == OtherPdf)
+	{
+		// Catch potential NaNs from (0,0) and (+inf, +inf)
+		return 0.5f;
+	}
+
+	// Evaluate the expression using the ratio of the smaller value to the bigger one for greater
+	// numerical stability. The math would also work using the ratio of bigger to smaller value,
+	// which would underflow less but would make the weights asymmetric. Underflow to 0 is not a
+	// bad property to have in rendering application as it ensures more weights are exactly 0
+	// which allows some evaluations to be skipped.
+	if (OtherPdf < Pdf)
+	{
+		float x = OtherPdf / Pdf;
+		return 1.0 / (1.0 + x * x);
+	}
+	else
+	{
+		// this form guarantees the weights add back up to one when arguments are swapped
+		float x = Pdf / OtherPdf;
+		return 1.0 - 1.0 / (1.0 + x * x);
+	}
+}
+
+// Given two lobes that will roughly contribute colors A and B to the total (estimated for example using directional albedo)
+// return the probability of choosing lobe A
+float LobeASelectionProb(vec3 A, vec3 B)
+{
+    const float SumA = A.x + A.y + A.z;
+    const float SumB = B.x + B.y + B.z;
+    return SumA / (SumA + SumB + 1e-6);
+}
+
+// Takes as input the sample weight and pdf for a certain lobe of a mixed model, together with the probability of picking that lobe
+// This function then updates a running total Weight and Pdf value that represents the overall contribution of the BxDF
+// This function should be called when a BxDF is made up of multiple lobes combined with a sum to correctly account for the probability
+// of sampling directions via all lobes.
+// NOTE: this function also contains special logic to handle cases with infinite pdfs cleanly
+void AddLobeWithMIS(inout vec3 Weight, inout float Pdf, float3 LobeWeight, float LobePdf, float LobeProb)
+{
+    const float MinLobeProb = 1.1754943508e-38; // smallest normal float
+    if (LobeProb > MinLobeProb)
+    {
+        LobePdf *= LobeProb;
+        LobeWeight *= 1 / LobeProb;
+
+        // basically: LobePdf / (Pdf + LobePdf), but robust version
+        float MISWeight;
+        if (Pdf < LobePdf)
+            MISWeight = 1 / (1 + Pdf / LobePdf);
+        else if (LobePdf < Pdf)
+            MISWeight = 1 - 1 / (1 + LobePdf / Pdf);
+        else
+            MISWeight = 0.5f; // avoid (rare) inf/inf
+
+        Weight = lerp(Weight, LobeWeight, MISWeight);
+        Pdf += LobePdf;
+    }
+}
+
+
+float VisibleGGXPDF(vec3 V, vec3 H, float a2)
+{
+	float NoV = V.z;
+	float NoH = H.z;
+	float VoH = dot(V, H);
+
+	float d = (NoH * a2 - NoH) * NoH + 1.;
+	float D = a2 / (PI*d*d);
+
+	float PDF = 2. * VoH * D / (NoV + sqrt(NoV * (NoV - NoV * a2) + a2));
+	return PDF;
+}
+
+
+// [ Heitz 2018, "Sampling the GGX Distribution of Visible Normals" ]
+// http://jcgt.org/published/0007/04/01/
+// PDF = G_SmithV * VoH * D / NoV / (4 * VoH)
+// PDF = G_SmithV * D / (4 * NoV)
+// DiskE = UniformSampleDisk(rnd());
+// a2 = alpha^2 = roughness^2
+vec4 ImportanceSampleVisibleGGX( vec2 DiskE, float a2, vec3 TangentV )
+{
+	// NOTE: See below for anisotropic version that avoids this sqrt
+	float a = sqrt(a2);
+
+	// stretch
+	vec3 Vh = normalize( vec3( a * TangentV.xy, TangentV.z ) );
+
+	// Stable tangent basis based on V
+	// Tangent0 is orthogonal to N
+	float LenSq = Vh.x * Vh.x + Vh.y * Vh.y;
+	vec3 Tangent0 = LenSq > 0 ? vec3(-Vh.y, Vh.x, 0) * rsqrt(LenSq) : vec3(1, 0, 0);
+	vec3 Tangent1 = cross(Vh, Tangent0);
+
+	vec2 p = DiskE;
+	float s = 0.5 + 0.5 * Vh.z;
+	p.y = (1. - s) * sqrt( 1 - p.x * p.x ) + s * p.y;
+
+	vec3 H;
+	H  = p.x * Tangent0;
+	H += p.y * Tangent1;
+	H += sqrt( clamp( 1. - dot( p, p ) , 0., 1.) ) * Vh;
+
+	// unstretch
+	H = normalize( vec3( a * H.xy, max(0.0, H.z) ) );
+
+	return vec4(H, VisibleGGXPDF(TangentV, H, a2));
+}
+
+
+float VisibleGGXPDFAniso(vec3 V, vec3 H, vec2 Alpha)
+{
+    float NoV = V.z;
+    float NoH = H.z;
+    float VoH = dot(V, H);
+    float a2 = Alpha.x * Alpha.y;
+    vec3 Hs = vec3(Alpha.y * H.x, Alpha.x * H.y, a2 * NoH);
+    float S = dot(Hs, Hs);
+    float D = (1.0f / PI) * a2 * pow(a2 / S, 2.);
+    float LenV = length(vec3(V.x * Alpha.x, V.y * Alpha.y, NoV));
+    float Pdf = (2 * D * VoH) / (NoV + LenV);
+    return Pdf;
+}
+
+// [ Heitz 2018, "Sampling the GGX Distribution of Visible Normals" ]
+// http://jcgt.org/published/0007/04/01/
+// PDF = G_SmithV * VoH * D / NoV / (4 * VoH)
+// PDF = G_SmithV * D / (4 * NoV)
+float4 ImportanceSampleVisibleGGXAniso(vec2 DiskE, vec2 Alpha, vec3 V)
+{
+    // stretch
+    vec3 Vh = normalize(vec3(Alpha * V.xy, V.z));
+
+    // Stable tangent basis based on V
+    float LenSq = Vh.x * Vh.x + Vh.y * Vh.y;
+    vec3 Tx = LenSq > 0 ? vec3(-Vh.y, Vh.x, 0) * rsqrt(LenSq) : vec3(1, 0, 0);
+    vec3 Ty = cross(Vh, Tx);
+
+    vec2 p = DiskE;
+    float s = 0.5 + 0.5 * Vh.z;
+    p.y = lerp(sqrt(1 - p.x * p.x), p.y, s);
+
+    vec3 H = p.x * Tx + p.y * Ty + sqrt(clamp(1 - dot(p, p), 0., 1.)) * Vh;
+
+    // unstretch
+    H = normalize(vec3(Alpha * H.xy, max(0.0, H.z)));
+
+    return vec4(H, VisibleGGXPDFAniso(V, H, Alpha));
+}
+
+// PDF = D * NoH / (4 * VoH)
+float GGXPDF( vec2 E, float a2 )
+{
+	float CosTheta = sqrt( (1 - E.y) / ( 1 + (a2 - 1) * E.y ) );
+	float d = ( CosTheta * a2 - CosTheta ) * CosTheta + 1;
+	float D = a2 / ( PI*d*d );
+	float PDF = D * CosTheta;
+	return PDF;
+}
+
+// PDF = D * NoH / (4 * VoH)
+vec4 ImportanceSampleGGX( vec2 E, float a2 )
+{
+	float Phi = 2. * PI * E.x;
+	float CosTheta = sqrt( (1. - E.y) / ( 1. + (a2 - 1.) * E.y ) );
+	float SinTheta = sqrt( 1. - CosTheta * CosTheta );
+
+	vec3 H;
+	H.x = SinTheta * cos( Phi );
+	H.y = SinTheta * sin( Phi );
+	H.z = CosTheta;
+	
+	float d = ( CosTheta * a2 - CosTheta ) * CosTheta + 1.;
+	float D = a2 / ( PI*d*d );
+	float PDF = D * CosTheta;
+
+	return vec4( H, PDF );
+}
+
+// Compute PDF of reflection (2 * dot( V, H ) * H - V).
+// [Heitz 2014, "Importance Sampling Microfacet-Based BSDFs using the Distribution of Visible Normals"]
+float RayPDFToReflectionRayPDF(float VoH, float RayPDF)
+{
+	float ReflectPDF = RayPDF / (4.0 * clamp(VoH, 0., 1.));
+
+	return ReflectPDF;
 }
