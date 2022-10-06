@@ -18,11 +18,11 @@ cbuffer ToyCB
 float map(vec3 p)
 {
     float d1 = length(p) - 1.;
-    float d2 = length(p - vec3(.3, .0, .0)) - .5;
-    float d = d1;
-    float id = 0.;
+    float d2 = abs(p.y + 1.1);
 
-    if (d2 < d) { d = d2; id = 1.; }
+    float d = d2, id = 0.;
+
+    if (d1 < d2) { d = d1; id = 1.; }
 
     return d;
 }
@@ -89,7 +89,7 @@ vec4 mainImage(vec2 fragCoord)
 
     float t = intersect(ro, rd);
 
-    vec3 col = vec3(0., 1., 0.);
+    vec3 col = vec3(0., 0.5, 1.);
 
     if (t < 100.)
     {

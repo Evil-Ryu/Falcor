@@ -59,6 +59,9 @@ private:
     std::vector<Camera::SharedPtr> mCameras;
     float mCameraSpeed = 1.f;
 
+    // for debug
+    Texture::SharedPtr mDebugTexture;
+
 
 
     void setPass(const int index);
@@ -68,4 +71,5 @@ private:
     void executeClearPass(RenderContext* pRenderContext, Fbo::SharedPtr Fbo);
     void resetCamera();
     void createFbos(uint32_t width, uint32_t height);
+    void createDebugResources();
 };

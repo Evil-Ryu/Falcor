@@ -5,3 +5,10 @@
 #define vec2 float2
 #define mix lerp
 #define fract frac
+#define mat3 float3x3
+
+
+float mod(float x, float y)
+{
+    return x - y * floor(x / y);
+}

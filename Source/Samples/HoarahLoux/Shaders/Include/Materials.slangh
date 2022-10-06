@@ -21,9 +21,8 @@
 
 
 
-// standard phong brdf
-// kd*(1./pi) + ks*((n+2)/2pi * (reflect * eye)^n
-struct PhongMaterial
+
+struct RyuMaterial
 {
     vec3 albedo;
     vec3 specularCol;
@@ -31,7 +30,32 @@ struct PhongMaterial
     float roughness;
     float F0;
     float anisotropy;
+    float transparency;
+    float eta;
+    float volumeId;  // indirection to different volume parameters,  -1 means no volume
 };
+
+struct VolumeMaterial
+{
+    vec3 extinction; // absorption + scattering
+
+    // scatteringAlbedo * extinction = scattering coefficient
+    vec3 scatteringAlbedo;
+};
+
+// simple diffuse 
+void MakeDefaultMaterial(out RyuMaterial mat)
+{
+    mat.albedo = vec3(1., 0., 1.);
+    mat.specularCol = vec3(1);
+    mat.shininess = 16.;
+    mat.roughness = 1.;
+    mat.F0 = 0.04;
+    mat.anisotropy = 0.;
+    mat.transparency = 0.;
+    mat.eta = 1.;
+    mat.volumeId = -1.;
+}
 
 // for dielectric
 float schlickFresnel(float F0, float lightDotHalf)
@@ -45,7 +69,9 @@ vec3 schlickFresnel(vec3 F0, float lightDotHalf)
     return F0 + (1. - F0) * pow(1.0 - lightDotHalf, 5.);
 }
 
-vec3 phongBrdf(vec3 toLight, vec3 toEye, vec3 normal, vec3 pos, PhongMaterial mat)
+// standard phong brdf
+// kd*(1./pi) + ks*((n+2)/2pi * (reflect * eye)^n
+vec3 phongBrdf(vec3 toLight, vec3 toEye, vec3 normal, vec3 pos, RyuMaterial mat)
 {
     vec3 wr = reflect(-toLight, normal);
     vec3 wh = normalize(toLight + toEye);

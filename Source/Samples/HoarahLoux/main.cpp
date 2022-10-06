@@ -64,6 +64,11 @@ void ShaderEditor::createFbos(uint32_t width, uint32_t height)
     }
 }
 
+void ShaderEditor::createDebugResources()
+{
+    mDebugTexture = Texture::create2D(DEFAULT_WIDTH, DEFAULT_HEIGHT, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+}
+
 void ShaderEditor::onLoad(RenderContext* pRenderContext)
 {
     // create rasterizer state
@@ -86,11 +91,11 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    mPasses[0].mPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/BurningShip.slang");
-    mPasses[0].mShaderPath = "Samples/HoarahLoux/Shaders/BurningShip.slang";
+    mPasses[0].mPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Pathtracer.slang");
+    mPasses[0].mShaderPath = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Pathtracer.slang";
 
-    mPasses[1].mPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/PathtracerPost.slang");
-    mPasses[1].mShaderPath = "Samples/HoarahLoux/Shaders/PathtracerPost.slang";
+    mPasses[1].mPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/PathtracerPost.slang");
+    mPasses[1].mShaderPath = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/PathtracerPost.slang";
 
 
     createFbos(DEFAULT_WIDTH, DEFAULT_HEIGHT);
@@ -99,8 +104,8 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
     mControllableVars.resize(MAX_CONTROLLABLE_VARS);
 
     // create the builtin  passes
-    mBlitPass = FullScreenPass::create("Samples/HoarahLoux/__InternalBlit.ps.slang");
-    mClearPass = FullScreenPass::create("Samples/HoarahLoux/__InternalClear.ps.slang");
+    mBlitPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/__InternalBlit.ps.slang");
+    mClearPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/__InternalClear.ps.slang");
 
 
     // camera
@@ -120,6 +125,8 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
     mCamParams.RayDirection = glm::normalize(mCamParams.RayTarget - mCamParams.RayOrigin);
     mCamParams.Right = glm::normalize(glm::cross(float3(0, 1, 0), mCamParams.RayDirection));
     mCamParams.Speed = 0.1f;*/
+
+    createDebugResources();
 }
 
 void ShaderEditor::setCommonVars(FullScreenPass::SharedPtr& pass, float w, float h)
@@ -194,6 +201,13 @@ void ShaderEditor::setCommonVars(FullScreenPass::SharedPtr& pass, float w, float
         {
             pass[varName] = mPasses[i].mFbo->getColorTexture(0);
         }
+    }
+
+
+    // debug
+    if (pass.getRootVar().findMember("debugTexture").isValid())
+    {
+        pass["debugTexture"] = mDebugTexture;
     }
 }
 
