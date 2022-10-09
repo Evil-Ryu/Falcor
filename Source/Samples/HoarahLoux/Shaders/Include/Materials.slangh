@@ -20,32 +20,34 @@
 // f = Microfacet specular BRDF = D*G*F / (4*NoL*NoV) = D*Vis*F
 
 
+#define MAT_TYPE_OPAQUE 0.
+#define MAT_TYPE_TRANSLUCENT 1.
+#define MAT_TYPE_SUBSURFACE 2.
+#define MAT_TYPE_VOLUME 3.
 
 
 struct RyuMaterial
 {
+    float type;
     vec3 albedo;
     vec3 specularCol;
     float shininess;
     float roughness;
     float F0;
     float anisotropy;
+
     float transparency;
     float eta;
-    float volumeId;  // indirection to different volume parameters,  -1 means no volume
-};
 
-struct VolumeMaterial
-{
     vec3 extinction; // absorption + scattering
-
-    // scatteringAlbedo * extinction = scattering coefficient
-    vec3 scatteringAlbedo;
+    vec3 scatteringAlbedo; // scatteringAlbedo * extinction = scattering coefficient
 };
+
 
 // simple diffuse 
 void MakeDefaultMaterial(out RyuMaterial mat)
 {
+    mat.type = MAT_TYPE_OPAQUE;
     mat.albedo = vec3(1., 0., 1.);
     mat.specularCol = vec3(1);
     mat.shininess = 16.;
@@ -54,7 +56,9 @@ void MakeDefaultMaterial(out RyuMaterial mat)
     mat.anisotropy = 0.;
     mat.transparency = 0.;
     mat.eta = 1.;
-    mat.volumeId = -1.;
+
+    mat.extinction = vec3(0.);
+    mat.scatteringAlbedo = vec3(1.);
 }
 
 // for dielectric
@@ -89,6 +93,20 @@ vec3 phongBrdf(vec3 toLight, vec3 toEye, vec3 normal, vec3 pos, RyuMaterial mat)
     return mix(spec_refl, diff_refl, mat.roughness);
 }
 
+
+vec3 evaluateIsotropicPhaseBsdf()
+{
+    float pdf = 0.25 / PI;
+    return vec3(pdf, pdf, pdf);
+}
+ 
+vec4 sampleIsotropicPhaseBsdf(vec3 rnd, out vec3 L)
+{
+    float pdf = 0.25 / PI;
+    L = UniformSampleSphereSimple(rnd);
+    vec3 brdf = evaluateIsotropicPhaseBsdf();
+    return vec4(brdf, pdf);
+}
 
 
 // GGX / Trowbridge-Reitz

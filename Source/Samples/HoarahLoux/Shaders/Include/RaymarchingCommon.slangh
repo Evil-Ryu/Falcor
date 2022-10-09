@@ -1,0 +1,53 @@
+#pragma once
+
+
+vec2 intersectRobust(in vec3 ro, in vec3 rd, float dist)
+{
+    float t = 0.0001;
+    float res_t = 0.0;
+    float res_d = 1000.0;
+    vec2 c, res_c;
+    float max_error = 1000.0;
+    float d = 1.0;
+    float pd = 100.;
+    float os = 0.0;
+    float step = 0.0;
+    float error = 1000.0;
+
+    for (int i = 0; i < 256; i++)
+    {
+        if (error < 0.001 || t > dist)
+        {
+        }
+        else {  // avoid broken shader on windows
+
+            c = map(ro + rd * t);
+            d = c.x;
+
+            if (d > os)
+            {
+                os = 0.4 * d * d / pd;
+                step = d + os;
+                pd = d;
+            }
+            else
+            {
+                step = -os; os = 0.0; pd = 100.; d = 1.0;
+            }
+
+            error = d / t;
+
+            if (error < max_error)
+            {
+                max_error = error;
+                res_t = t;
+                res_c = c;
+            }
+
+            t += step;
+        }
+
+    }
+    if (t > dist/* || max_error > pixel_size*/) res_t = 1000.0;
+    return vec2(res_t, res_c.y);
+}

@@ -91,8 +91,8 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    mPasses[0].mPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Pathtracer.slang");
-    mPasses[0].mShaderPath = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Pathtracer.slang";
+    mPasses[0].mPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Raymarcher.slang");
+    mPasses[0].mShaderPath = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Raymarcher.slang";
 
     mPasses[1].mPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/PathtracerPost.slang");
     mPasses[1].mShaderPath = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/PathtracerPost.slang";
@@ -118,7 +118,7 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
     camera->beginFrame();
 
 
-    mMaxSPP = 4096.f;
+    mMaxSPP = 40960.f;
 
    /* mCamParams.RayOrigin = float3(0., 0., -3.);
     mCamParams.RayTarget = float3(0, 0, 0);

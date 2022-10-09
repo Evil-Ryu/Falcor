@@ -73,7 +73,3 @@ vec3 hash33(vec3 p)
 
 //----------------------------------------------------------------------------------------
 
-vec3 rndUnitSphere(float s)
-{
-    return normalize(tan(hash31(s)));
-}

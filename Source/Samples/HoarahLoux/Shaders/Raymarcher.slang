@@ -1,5 +1,5 @@
 
-// pathtracer with transparency, single scattering volume
+// pathtracer with transparency, multi scattering volume
 
 #include "Include/GLSLDefines.slangh"
 
@@ -32,8 +32,7 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 #define EVENT_TRANSMISSION 2.
 
 #define MAT_CHEKERBOARD 0.
-#define MAT_HOMO_VOLUME 3.
-#define MAT_HETER_VOLUME 4.
+#define MAT_GLASS_SINGLE_SCATTER 4.
 #define MAT_GLASS 5.
 
 #include "Include/CommonDefines.slangh"
@@ -48,7 +47,8 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 static float seed;
 static float distanceFactor = 1.; // for marching through object
 static vec2 debugFragCoord;
-
+static float debugBounce = 0.;
+static vec4 debugVec = vec4(0.);
 
 // https://github.com/Syntopia/Fragmentarium/blob/master/Fragmentarium-Source/Examples/Include/Sunsky.frag
 //static float sunSize = 0.53; //degree
@@ -57,6 +57,26 @@ static float sunAngularDiameterCos = cos(sunSize * PI / 180.0);
 static vec3 sunCol = vec3(1.1, .8, .5) * 5.;
 static vec3 skyCol = vec3(0.1, .5, 1.) * .2;
 static vec3 sunDir = normalize(vec3(1., 1., -1.));
+vec3 mapToDebugColor(float val)
+{
+    vec3 col = vec3(0.);
+    if (val <= 0.)
+        col = vec3(1., 0., 1.);
+    else if (val > 0. && val < 0.5)
+        col = vec3(0., 0., .5);
+    else if (val >= 0.5 && val < 1.)
+        col = vec3(0., 0., 1.);
+    else if (val >= 1. && val < 2.)
+        col = vec3(0., 0.5, 0.);
+    else if (val >= 2. && val < 3.)
+        col = vec3(0., 1., 0.);
+    else if (val >= 3. && val < 4.)
+        col = vec3(.5, .5, 0.);
+    else if (val >= 4. && val < 5.)
+        col = vec3(1., 1., 0.);
+    else col = vec3(.5, 0., 0.);
+    return col;
+}
 
 bool sameHemisphere(in vec3 n, in vec3 a, in vec3 b)
 {
@@ -73,6 +93,7 @@ RyuMaterial getMaterial(float id, vec3 pos)
     RyuMaterial mat;
     //MakeDefaultMaterial(mat);
 
+    mat.type = MAT_TYPE_OPAQUE;
     mat.albedo = vec3(1., 0., 1.);
     mat.specularCol = vec3(1);
     mat.shininess = 16.;
@@ -81,7 +102,6 @@ RyuMaterial getMaterial(float id, vec3 pos)
     mat.anisotropy = 0.;
     mat.transparency = 0.;
     mat.eta = 1.;
-    mat.volumeId = -1.;
 
     if (id == 0.)
     {
@@ -104,28 +124,41 @@ RyuMaterial getMaterial(float id, vec3 pos)
         mat.roughness = 0.5;
         mat.shininess = 64.;
     }
-    else if (id == MAT_HOMO_VOLUME)
+    else if (id == MAT_GLASS_SINGLE_SCATTER)
     {
-        mat.albedo = vec3(.7);
-        mat.specularCol = vec3(1.); // extinction
-        mat.roughness = 0.5;  
-        mat.shininess = 64.;
+        mat.type = MAT_TYPE_TRANSLUCENT;
+        mat.albedo = vec3(0.1);
+        mat.specularCol = vec3(0.5);
+        mat.roughness = 0.1;
+        mat.shininess = 128.;
+        mat.transparency = .5;
+        mat.eta = 1. / 1.5;
+        mat.extinction = vec3(0.5);
+        mat.scatteringAlbedo = vec3(.9);
     }
     else if (id == MAT_GLASS)
     {
+        mat.type = MAT_TYPE_TRANSLUCENT;
         mat.albedo = vec3(0.1);
         mat.specularCol = vec3(1.);
         mat.roughness = 0.1;
         mat.shininess = 128.;
         mat.transparency = .5;
         mat.eta = 1. / 1.5;
-        mat.volumeId = 0.;
+        mat.extinction = vec3(0.5);
+        mat.scatteringAlbedo = vec3(.9);
     }
 
 
     return mat;
 }
 
+
+
+bool isRayInVolume()
+{
+    return distanceFactor < 0.;
+}
 
 float noise3d(vec3 p)
 {
@@ -159,7 +192,7 @@ float fbm3d(vec3 p)
 
 float sampleVolume(vec3 p)
 {
-    return fbm3d(p);
+    return 1. - smoothstep(0.0, .3, fbm3d(p * 4.));
 }
 
 
@@ -211,6 +244,17 @@ float apollonian(vec3 p)
     return 0.25 * abs(p.y) / scale;
 }
 
+vec2 mapVolume(vec3 p)
+{
+    float d = length(p+vec3(0., -.1, 0.)) - 1.;
+    //float d = sdTorus(p, vec2(1., .3));
+    //float d = sdBox(p, vec3(1.));
+    // thin shell and hollow inside
+    //d = max(d, -(d + 0.1));
+
+    return vec2(d, MAT_GLASS_SINGLE_SCATTER);
+}
+
 vec2 map(vec3 p)
 {
     //float d1 = mapBurningShip(p, 2.);//mapMandelBox(p+vec3(1., -1.5, 0.));
@@ -223,11 +267,9 @@ vec2 map(vec3 p)
     //float d = d0;
     //float id = MAT_GLASS;
 
-    float d1 = length(p+vec3(0., -.1, 0.)) - 1.;
-    //float d1 = sdTorus(p, vec2(1., .2));
-    // thin shell and hollow inside
-    //d1 = max(d1, -(d1 + 0.05));
-    float d = d1, id = MAT_GLASS;
+
+    vec2 res = mapVolume(p);
+    float d = res.x, id = res.y;
 
     float d2 = abs(p.y + 1.1)-0.1;
 
@@ -248,9 +290,8 @@ vec2 map(vec3 p)
 
 vec2 mapVolumeBoundary(vec3 p)
 {
-    float d = length(p + vec3(0., -.1, 0.)) - 1.;
-
-    return vec2(d, MAT_GLASS);
+    vec2 res = mapVolume(p);
+    return res;
 }
 
 vec3 getNormal(vec3 p)
@@ -265,7 +306,6 @@ vec3 getNormal(vec3 p)
     return normalize(n);
 }
 
-#if 1
 vec2 intersect(vec3 ro, vec3 rd, float dist)
 {
     float t = INTER_THRESHOLD;
@@ -287,81 +327,75 @@ vec2 intersect(vec3 ro, vec3 rd, float dist)
 
     return vec2(t, res.y);
 }
-#else
 
-vec2 intersect(in vec3 ro, in vec3 rd, float dist)
+
+vec3 transmittanceHomogeneous(float distance, vec3 extinction);
+
+
+// shadow ray with volume transmission
+// return:  vec4(beamTransmittance.xyz, occluderDist)
+vec3 shadowRay(vec3 ro, vec3 rd, float dist, RyuMaterial mat)
 {
-    float t = 0.0001;
-    float res_t = 0.0;
-    float res_d = 1000.0;
-    vec2 c, res_c;
-    float max_error = 1000.0;
-    float d = 1.0;
-    float pd = FAR0;
-    float os = 0.0;
-    float step = 0.0;
-    float error = 1000.0;
+    vec2 hit = intersect(ro, rd, dist);
+    float occluderDist = hit.x;
 
-    for (int i = 0; i < MARCHING_STEPS; i++)
+    vec3 beamTransmittance = vec3(1., 1., 1.);
+
+    if (isRayInVolume())
     {
-        if (error < INTER_THRESHOLD || t > dist)
-        {
-        }
-        else {  // avoid broken shader on windows
+        float boundaryDist = intersectVolumeBoundary(ro, rd, dist).x;
+        float transmissionDist = min(boundaryDist, occluderDist);
 
-            c = map(ro + rd * t);
-            d = c.x;
-
-            if (d > os)
-            {
-                os = 0.4 * d * d / pd;
-                step = d + os;
-                pd = d;
-            }
-            else
-            {
-                step = -os; os = 0.0; pd = FAR0; d = 1.0;
-            }
-
-            error = d / t;
-
-            if (error < max_error)
-            {
-                max_error = error;
-                res_t = t;
-                res_c = c;
-            }
-
-            t += step;
-        }
-
+        beamTransmittance = transmittanceHomogeneous(transmissionDist, mat.extinction);
     }
-    if (t > dist/* || max_error > pixel_size*/) res_t = 1000.0;
-    return vec2(res_t, res_c.y);
+    else
+    {
+        if (occluderDist < dist)
+            beamTransmittance = vec3(0.);
+    }
+
+    return beamTransmittance;
 }
-#endif
 
 
-vec4 sampleLight(vec3 pos, vec3 V, vec3 n, RyuMaterial mat)
+
+vec4 sampleLight(vec3 pos, vec3 V, vec3 n, RyuMaterial mat, bool hitVolumeParticle)
 {
     vec3 col = vec3(0);
-    float costheta = dot(sunDir, n);
-    if (costheta <= 0.)
-        return vec4(col, 1.);
 
-    vec3 rd = sunDir;// getConeSample(lightDir, 1. - sunAngularDiameterCos);
-    float pdf = 1.f;
+    float costheta = 1.; 
 
-    if (pdf < EPSILON) return vec4(0);
-
-    vec2 res = intersect(pos + (INTER_THRESHOLD * 2.) * n, rd, 20.);
-
-    if (res.x > 20.)
+    // there is no costheta term for volume particle lighting
+    if (!hitVolumeParticle)
     {
-        col = costheta * sunCol * phongBrdf(rd, V, n, pos, mat) / pdf;
+        costheta = dot(sunDir, n);
+        pos += (INTER_THRESHOLD * 2.) * n;
+
+        if (costheta <= 0.)
+            return vec4(col, 1.);
     }
 
-    return vec4(col, pdf);
+    vec3 rd = sunDir;// getConeSample(lightDir, 1. - sunAngularDiameterCos);
+    float lightSelectPdf = 1.f;
+
+    if (lightSelectPdf < EPSILON) return vec4(0);
+
+    vec3 shadow = shadowRay(pos, rd, 50., mat);
+
+    vec3 brdfAndCos = vec3(0.);
+
+    if (hitVolumeParticle)
+    {
+        brdfAndCos = evaluateIsotropicPhaseBsdf();
+    }
+    else
+    {
+        brdfAndCos = phongBrdf(rd, V, n, pos, mat) * costheta;
+    }
+
+    col = sunCol * brdfAndCos * shadow / lightSelectPdf;
+
+    return vec4(col, lightSelectPdf);
 }
 
 vec4 brdfEvaluate(
@@ -431,7 +465,7 @@ vec4 sampleLambert(
     return vec4(diff, pdf);
 }
 
-vec4 sampleBsdf(
+vec4 sampleSurfaceBsdf(
     vec3 pos,
     vec3 worldGeomNormal,
     vec3 worldNormal,
@@ -463,12 +497,34 @@ vec4 sampleBsdf(
     return brdfEvaluate(mat, worldGeomNormal, worldNormal, V, L, lobePdf);
 }
 
-// feature begin volume
 
-bool IsVolume(float matId)
+vec4 sampleBsdf(
+    vec3 pos,
+    vec3 worldGeomNormal,
+    vec3 worldNormal,
+    vec3 V,
+    RyuMaterial mat,
+    bool hitVolumeParticle,
+    out vec3 L
+)
 {
-    return (matId == MAT_HOMO_VOLUME || matId == MAT_HETER_VOLUME);
+    vec4 brdfAndPdf = vec4(1.);
+
+    if (hitVolumeParticle)
+    {
+        brdfAndPdf = sampleIsotropicPhaseBsdf(hash31(seed++), L);
+    }
+    else
+    {
+        brdfAndPdf = sampleSurfaceBsdf(pos, worldGeomNormal, worldNormal, V, mat, L);
+    }
+
+    return brdfAndPdf;
 }
+
+
+
+// feature begin volume
 
 vec2 intersectVolumeBoundary(vec3 ro, vec3 rd, float maxDist)
 {
@@ -495,41 +551,6 @@ float avgChannels(vec3 v)
     return (v.x + v.y + v.z) / 3.;
 }
 
-// return vec4(valueOfBsdf, pdf)
-vec4 evaluateIsotropicPhaseBsdf()
-{
-    float pdf = 0.25 / PI;
-    return vec4(pdf, pdf, pdf, pdf);
-}
-
-// returns the sampled direction and its pdf
-vec4 sampleIsotropicPhaseBsdf()
-{
-    float2 rnd = hash21(seed++);
-    vec3 sampleDir = vec3(0.);
-
-    sampleDir.z = rnd.x * 2.0 - 1.0; // cosTheta
-
-    float sinTheta = 1.0 - sampleDir.z * sampleDir.z; // square of sinTheta
-
-    if (sinTheta > 0.0)
-    {
-        sinTheta = sqrt(sinTheta);
-        float phi = rnd.y * 2.0 * PI;
-
-        sampleDir.x = sinTheta * cos(phi);
-        sampleDir.y = sinTheta * sin(phi);
-    }
-    else
-    {
-        sampleDir.x = sampleDir.y = 0.0;
-    }
-
-    float pdf = 0.25 / PI;
-
-    return vec4(sampleDir, pdf);
-}
-
 
 // Beer's Law volume
 // only constant absorbtion
@@ -543,22 +564,6 @@ vec3 BeersLawTransmittance(vec3 p0, vec3 p1, vec3 absorption)
 {
     float dist = length(p0 - p1);
     return exp(absorption * -dist);
-}
-
-vec3 integrateBeersLawVolume(vec3 ro, vec3 rd, vec3 n, vec3 absorption, inout vec3 transmittance, out vec3 weight, inout vec2 hit)
-{
-    hit = intersect(ro, rd, FAR);
-    float t = hit.x;
-
-    // problematic, the bound geometry of the volume may not be water tight?
-    // which is not likely in raymarching
-    if (t > FAR)
-        return vec3(0.);
-
-    transmittance = BeersLawTransmittance(t, absorption);
-    weight = vec3(1.);
-
-    return vec3(0.0);
 }
 
 // Beer's Law volume, heterogeneous
@@ -581,7 +586,7 @@ vec3 BeersLawHeterTransmittance(vec3 p0, vec3 p1, float maxAbsorption)
         }
 
         vec3 p = p0 + t * dir;
-        float absorption = clamp(smoothstep(0.5, .6,sampleVolume(p * 8.)), 0., 1.);
+        float absorption = sampleVolume(p);
 
         float rnd = hash11(seed++);
         if (rnd < absorption / maxAbsorption)
@@ -610,21 +615,6 @@ vec3 integrateBeersLawHeterVolume(vec3 ro, vec3 rd, vec3 n, float maxAbsorption,
     return vec3(0.0);
 }
 
-// Homogeneous volume
-// parameterization:
-// vec3 extinction:   constant
-// vec3 scatteringAlbedo
-// T(t) = exp(extinction * -t)
-// 
-// pdf for sampling T(t):  p(t) = extinction * exp(extinction * -t)
-// sample from p(t):  t' = -ln(1 - rnd) / extinction
-// note: above extincion is rgb, but a single value is expected, so we can use avg(extinction.rgb) instead
-
-// version 2:  t remapped into range [0, d]
-// p(t) = (extinction * exp(extinction * -t)) / (1 - exp(extinction * -t))
-// sample from p(t):  t' = -ln(1 - rnd * (1 - exp(extinction * -d))) / extinction
-//                       = -ln(1 - rnd * (1 - T(d)) / extinction
-
 vec3 transmittanceHomogeneous(float distance, vec3 extinction)
 {
     return exp(extinction * -distance);
@@ -639,179 +629,128 @@ vec3 transmittanceHomogeneous(vec3 p0, vec3 p1, vec3 extinction)
 }
 
 
-// integrate the whole volume
-// weight: inverse of the pdf of sampling the scattering point in the volume
-// return: integrated incoming radiance at pos
-vec3 integrateHomogeneousVolume(vec3 ro, vec3 rd, vec3 n, vec3 extinction, vec3 scatteringAlbedo, inout vec3 totalTransmittance, out vec3 weight, out vec2 hit)
-{
-    // hit surface inside the volume or we reach the boundary of the volume
-    // for calculating the total transmittance in between
-    hit = intersect(ro, rd, FAR);
-    float t = hit.x;
-    // problematic, the bound geometry of the volume may not be water tight?
-    // which is not likely in raymarching
-    if (t > FAR)
-        return vec3(0.);
-
-    vec3 posd = ro + t * rd;
-
-    totalTransmittance = transmittanceHomogeneous(ro, posd, extinction);
-    float totalTrans = avgChannels(totalTransmittance);
-
-    // randomly sample a point between ro and hit
-    float rnd = hash11(seed++);
-    float scatterDist = -log(1. - rnd * (1. - totalTrans)) / avgChannels(extinction);
-    vec3 scatterPos = ro + scatterDist * rd;
-
-    // sample direct lighting for this point
-    vec3 lightDir = sunDir;
-
-    // Shadow ray,  either hit an occluder inside the volume or the volume boundary
-    float occluderDist = intersect(scatterPos, lightDir, FAR).x;
-
-    vec3 occulder = scatterPos + occluderDist * lightDir;
-    vec3 beamTransmittance = transmittanceHomogeneous(scatterPos, occulder, extinction);
-    vec4 bsdfAndPdf = evaluateIsotropicPhaseBsdf();
-    // the contribution of direct lighting
-    vec3 L = sunCol * bsdfAndPdf.xyz * beamTransmittance;
-
-    // sample bsdf for direct lighting, mis combined with above, currently does not apply
-    // generate next ray based on phase bsdf
-    //vec4 dirAndPdf = sampleIsotropicPhaseBsdf();
-
-    // the contribution of sample position back to pos
-    vec3 transmittance = transmittanceHomogeneous(scatterDist, extinction);
-    // scattering albedo * extinction =  scattering coefficient
-    L *= scatteringAlbedo * extinction * transmittance;
-
-    weight = (1. - totalTrans) / (transmittance * extinction);
-
-    return L;
-}
-
-// end volume
-
-
-
-
-//vec4 evaluateLightingAndMisSampling(
-//    vec3 rayDir,
-//    vec3 pos,
-//    vec3 normal,
-//    float matId,
-//    out vec3 rd,
-//    out vec3 brdf)
-//{
-//    // TODO: refine
-//    if(IsVolume(matId))
-//    {
-//        rd = rayDir;
-//        brdf = vec3(1.);
-//        return vec4(0., 0., 0., 1.);
-//    }
-//
-//    bool useMis = true;
-//   
-//    vec4 res1 = sampleLight(pos, -rayDir, normal, matId);
-//    //vec4 res2 = sampleLambert(pos, normal, normal, -rayDir, matid, useMis, rd);
-//    vec4 res2 = sampleBsdf(pos, normal, normal, -rayDir, matId, rd);
-//
-//    brdf = res2.xyz;
-//
-//    // combine with mis
-//    //vec3 col = res1.xyz * misWeight(res1.w, res2.w) + res2.xyz * misWeight(res2.w, res1.w);
-//
-//    // there's still only directional light, so bsdf sampling contributes no lighting
-//    vec3 col = res1.xyz;
-//    return vec4(col, res2.w);
-//}
 
 // returns lighting and light picking pdf
-vec4 nee(vec3 rd, vec3 pos, vec3 n, RyuMaterial mat)
+vec4 nee(vec3 rd, vec3 pos, vec3 n, RyuMaterial mat, bool hitVolumeParticle)
 {
-    vec4 directLighting = sampleLight(pos, -rd, n, mat);
+    vec4 directLighting = sampleLight(pos, -rd, n, mat, hitVolumeParticle);
     return directLighting;
 }
 
-vec4 sampleBtdf(
-    vec3 rd,
-    vec3 pos,
-    vec3 worldGeomNormal,
-    vec3 worldNormal,
-    RyuMaterial mat,
-    float matId,
-    int i,
-    out vec3 nextRd,
-    out vec3 nextRo,
-    out float nextEvent,
-    out bool inVolume
-)
-{    
-    if (i == 0)
+
+// works for heterogeneous volume
+// asumming volume is piecewise homogeneous
+#if 0
+vec3 raymarchingTransmittance(vec3 p0, vec3 p1, float stepSize)
+{
+    vec3 dir = p1 - p0;
+    float distance = length(p1 - p0);
+    dir *= 1. / distance;
+    int nsteps = int(ceil(distance / stepSize));
+
+    // 
+    float adjustedStepSize = distance / float(nsteps);
+
+    vec3 throughput = vec3(1.);
+    float t = 0.;
+    for (int i = 0; i < nsteps; ++i)
     {
-        debugTexture[debugFragCoord] = float4(matId, mat.transparency, mat.roughness, 0.);
+        vec3 p = p0 + t * dir;
+        vec3 extinction = vec3(sampleVolume(p));
+        throughput *= transmittanceHomogeneous(adjustedStepSize, extinction);
+        t += adjustedStepSize;
     }
 
+    return throughput;
+}
+#endif
 
-    vec4 btdfAndPdf = vec4(0., 0., 0., 1.);
 
-    vec3 n = worldNormal;
+// using this form is to reduce computation cost, marching to find volumeboudary at each position is too costly
+vec3 raymarchingTransmittance(vec3 p0, vec3 dir, int nsteps, float stepSize)
+{
+    // TODO: dither
+    float adjustedStepSize = stepSize;
 
-    float eta = mat.eta;
-    if (distanceFactor < 0.)
+    vec3 throughput = vec3(1.);
+    float t = 0.;
+    for (int i = 0; i < nsteps; ++i)
     {
-        eta = 1. / eta;
+        vec3 p = p0 + t * dir;
+        vec3 extinction = vec3(sampleVolume(p));
+        throughput *= transmittanceHomogeneous(adjustedStepSize, extinction);
+        t += adjustedStepSize;
     }
 
-    vec3 refr = refract(rd, n, eta);
-
-  
-    // always pick transmission if translucent
-    // so the pdf of transimission event should be 1
-    if (mat.transparency > 0.01)
-    {
-        // internal reflection
-        if (dot(refr, refr) < 0.001)
-        {
-            nextRd = reflect(rd, n);  // perfect reflection atm
-            nextRo = pos + 0.01 * n;
-
-            btdfAndPdf.xyz = mat.transparency;
-            nextEvent = EVENT_REFLECTION;
-        }
-        else
-        {
-            distanceFactor = -distanceFactor;
-            inVolume = distanceFactor < 0;
-
-            eta = 1. / eta;
-
-            nextRd = refr;
-            nextRo = pos - 0.01 * n;
-
-            btdfAndPdf.xyz = mat.transparency;
-            nextEvent = EVENT_TRANSMISSION;
-        }
-    }
-    else
-    {
-        btdfAndPdf = sampleBsdf(pos, worldGeomNormal, worldNormal, -rd, mat, nextRd);
-        nextEvent = EVENT_REFLECTION;
-    }
-
-    return btdfAndPdf;
+    return throughput;
 }
 
+#define VOLUME_MARCHING_STEPS 64
+vec3 integrateVolume(vec3 ro, vec3 rd, vec3 scatteringAlbedo, out vec3 weight, out vec3 totalTransmittance, out vec2 hit)
+{
+    float rnd = hash11(seed++);
+    vec4 L = vec4(0., 0., 0., 1.);
+
+    // make sure ro is in volume already
+    hit = intersectVolumeBoundary(ro, rd, FAR);
+    float t = 0.;
+
+    float stepSize = hit.x / float(VOLUME_MARCHING_STEPS);
+
+    vec3 accTransmittance = vec3(1.);
+
+    for (int i = 0; i < VOLUME_MARCHING_STEPS; ++i)
+    {
+        vec3 p = ro + t * rd;
+        vec3 extinction = vec3(sampleVolume(p));
+
+        if (any(extinction) > 0.)
+        {
+            // shadow ray transmittance
+            vec3 beamTransmittance = raymarchingTransmittance(p, sunDir, 10, .1);
+
+            vec3 bsdf = evaluateIsotropicPhaseBsdf();
+            vec3 col = sunCol * bsdf.xyz * beamTransmittance;
+            // scattering albedo * extinction =  scattering coefficient
+            col *= scatteringAlbedo * extinction * accTransmittance;
+
+            // transmittance from pos back to ro
+            accTransmittance *= transmittanceHomogeneous(stepSize, extinction);
+
+            L.xyz += col;
+        }
+
+        if (all(accTransmittance) < .1 || t > hit.x) break;
+
+        t += stepSize;
+        //stepSize = max(.05, .02 * t);
+    }
+
+    totalTransmittance = accTransmittance;
+    weight = vec3(1.);
+    return L.xyz;
+}
 
 vec3 scene(vec3 ro, vec3 rd)
 {
     vec2 hit = intersect(ro, rd, FAR);
 
-    // bounces
     vec3 throughput = vec3(1.);
+
+    // for ray passing through a volume, the contribution of each scattering point along the ray
+    // for surface hit the weight is always 1 for the first hit as there is no further hit
+    vec3 weight = vec3(1.);
     vec3 Lo = vec3(0);
+
+    // only will be true for multi scattering volume
+    // single scattering volume will finish sampling the volume in one bounce, then the ray is out
+    bool hitVolumeParticle = false;
+
+    // bounces
     for (int i = 0; i < MAX_BOUNCES; ++i)
     {
+        debugBounce = float(i);
+
         if (hit.x > FAR)
         {
             // indirect part
@@ -821,7 +760,7 @@ vec3 scene(vec3 ro, vec3 rd)
             break;
         }
 
-        vec3 pos = ro + hit.x * rd; 
+        vec3 pos = ro + hit.x * rd;
 
         vec3 n = getNormal(pos) * distanceFactor;
 
@@ -831,7 +770,7 @@ vec3 scene(vec3 ro, vec3 rd)
         vec3 nextRd = rd, nextRo = pos;
 
         // can use mis to optimize
-        vec4 directLightingAndPdf = nee(rd, pos, n, mat);
+        vec4 directLightingAndPdf = nee(rd, pos, n, mat, hitVolumeParticle);
 
         // direct part, NEE, use MIS to optimize
         // returns the new rd for the next event and the brdf of the inirect part
@@ -840,9 +779,8 @@ vec3 scene(vec3 ro, vec3 rd)
         // throughput = A0C0..An-1Cn-1,  direct = AnCnLn
         Lo += throughput * directLightingAndPdf.xyz;
 
-
         float nextEvent = EVENT_REFLECTION;
-        
+
         /*vec4 btdfAndPdf = sampleBtdf(rd,
                                     pos,
                                     n,
@@ -860,21 +798,16 @@ vec3 scene(vec3 ro, vec3 rd)
         // Sample btdf
         {
             float eta = mat.eta;
-            if (distanceFactor < 0.)
+            if (isRayInVolume())
             {
                 eta = 1. / eta;
             }
 
             vec3 refr = refract(rd, n, eta);
 
-          /*  if (i == 0)
-            {
-                debugTexture[debugFragCoord] = float4(matId, mat.transparency, mat.roughness, 0.);
-            }*/
-
-            // always pick transmission if translucent
+            // always pick transmission if possible
             // so the pdf of transimission event should be 1
-            if (mat.transparency > 0.01)
+            if (!hitVolumeParticle && mat.type == MAT_TYPE_TRANSLUCENT)
             {
                 // internal reflection
                 if (dot(refr, refr) < 0.001)
@@ -898,7 +831,7 @@ vec3 scene(vec3 ro, vec3 rd)
             }
             else
             {
-                btdfAndPdf = sampleBsdf(pos, n, n, -rd, mat, nextRd);
+                btdfAndPdf = sampleBsdf(pos, n, n, -rd, mat, hitVolumeParticle, nextRd);
                 nextEvent = EVENT_REFLECTION;
             }
         }
@@ -906,36 +839,42 @@ vec3 scene(vec3 ro, vec3 rd)
 
         if (btdfAndPdf.w < EPSILON) break;
 
-
         //if ((nextEvent == EVENT_TRANSMISSION && mat.volumeId >= 0.) || distanceFactor < 0.)
-        // is inside volume ?
-        if(distanceFactor < 0.)
+        if (isRayInVolume())
         {
-            vec3 weight = vec3(0.), transmittance = vec3(1.);
+            vec3 transmittance = vec3(1.);
 
-            VolumeMaterial vmat;
-            vmat.extinction = vec3(0.5);
-            vmat.scatteringAlbedo = vec3(.8);
-
-            vec3 LVolume = integrateHomogeneousVolume(nextRo, nextRd, n, vmat.extinction, vmat.scatteringAlbedo, transmittance, weight, hit);
-            Lo += LVolume * weight * throughput;
-
-           // vec3 LVolume = integrateBeersLawVolume(nextRo, nextRd, n, vmat.extinction, transmittance, weight, hit);
-           //Lo += LVolume * weight * throughput;
-
-            //svec3 LVolume = integrateBeersLawHeterVolume(nextRo, nextRd, n, 1., transmittance, weight, hit);
+            hitVolumeParticle = false;
+            float maxExtinction = 1.;
+            // vec3 LVolume = integrateBeersLawVolume(nextRo, nextRd, n, mat.extinction, transmittance, weight, hit);
             //Lo += LVolume * weight * throughput;
 
+                //svec3 LVolume = integrateBeersLawHeterVolume(nextRo, nextRd, n, maxExtinction, transmittance, weight, hit);
+                //Lo += LVolume * weight * throughput;
 
+            /* vec3 LVolume = integrateHomogeneousVolume(nextRo, nextRd, n, mat.extinction, mat.scatteringAlbedo, transmittance, weight, hit);
+                Lo += LVolume * weight * throughput;*/
+
+            //vec3 LVolume = integrateHeterogeneousVolume(nextRo, nextRd, n, maxExtinction, mat.scatteringAlbedo, transmittance, weight, hit);
+            //Lo += LVolume * weight * throughput;
+
+            vec3 LVolume = integrateVolume(nextRo, nextRd, mat.scatteringAlbedo, weight, transmittance, hit);
+            Lo += LVolume * weight * throughput;
+
+            // for single scattering
             throughput *= transmittance;
+            
+            //return mapToDebugColor((transmittance * weight * btdfAndPdf.xyz / btdfAndPdf.w).x);
         }
         else
         {
             if (nextEvent != EVENT_TRANSMISSION)
             {
+
                 // Lo = A0C0L0 + A0C0A1C1L1 + ... + A0C0..AnCnLn  (A is the brdf, C is cos, L is directLight)
                 // accumulate the new brdf*cos for this round,  brdf * cos / pdf
                 throughput *= btdfAndPdf.xyz * max(0., dot(nextRd, n)) / btdfAndPdf.w;
+
                 // this is important
                 nextRo = pos + (INTER_THRESHOLD * 2.) * n;
             }
@@ -947,9 +886,9 @@ vec3 scene(vec3 ro, vec3 rd)
         rd = nextRd;
         ro = nextRo;
     }
-
     return Lo;
 }
+
 
 
 vec4 mainImage(vec2 fragCoord)

@@ -93,6 +93,29 @@ vec3 ortho(vec3 v)
     return abs(v.x) > abs(v.z) ? vec3(-v.y, v.x, 0.0) : vec3(0.0, -v.z, v.y);
 }
 
+vec3 UniformSampleSphereSimple(vec3 rnd)
+{
+    return normalize(tan(rnd));
+}
+
+// PDF = 1 / (4 * PI)
+vec4 UniformSampleSphere(vec2 E)
+{
+    float Phi = 2 * PI * E.x;
+    float CosTheta = 1 - 2 * E.y;
+    float SinTheta = sqrt(1 - CosTheta * CosTheta);
+
+    vec3 H;
+    H.x = SinTheta * cos(Phi);
+    H.y = SinTheta * sin(Phi);
+    H.z = CosTheta;
+
+    float PDF = 1.0 / (4 * PI);
+
+    return vec4(H, PDF);
+}
+
+
 vec2 UniformSampleDisk(vec2 E)
 {
     float Theta = 2 * PI * E.x;
@@ -360,6 +383,33 @@ vec4 ImportanceSampleGGX( vec2 E, float a2 )
 	float PDF = D * CosTheta;
 
 	return vec4( H, PDF );
+}
+
+// returns the sampled direction and its pdf
+vec4 sampleIsotropicPhaseBsdf(vec2 rnd)
+{
+    vec3 sampleDir = vec3(0.);
+
+    sampleDir.z = rnd.x * 2.0 - 1.0; // cosTheta
+
+    float sinTheta = 1.0 - sampleDir.z * sampleDir.z; // square of sinTheta
+
+    if (sinTheta > 0.0)
+    {
+        sinTheta = sqrt(sinTheta);
+        float phi = rnd.y * 2.0 * PI;
+
+        sampleDir.x = sinTheta * cos(phi);
+        sampleDir.y = sinTheta * sin(phi);
+    }
+    else
+    {
+        sampleDir.x = sampleDir.y = 0.0;
+    }
+
+    float pdf = 0.25 / PI;
+
+    return vec4(sampleDir, pdf);
 }
 
 // Compute PDF of reflection (2 * dot( V, H ) * H - V).
