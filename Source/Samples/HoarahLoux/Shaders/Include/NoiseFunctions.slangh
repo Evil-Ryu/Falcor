@@ -1,0 +1,152 @@
+
+
+
+
+#include "GLSLDefines.slangh"
+#include "Randoms.slangh"
+
+// useful reference:  https://www.shadertoy.com/view/4sfGzS
+
+
+float valueNoise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+
+    vec2 u = f * f * (3.0 - 2.0 * f);
+
+    return mix(mix(hash12(i + vec2(0.0, 0.0)),
+        hash12(i + vec2(1.0, 0.0)), u.x),
+        mix(hash12(i + vec2(0.0, 1.0)),
+            hash12(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+// return gradient noise (in x) and its derivatives (in yz)
+vec3 valueNoised(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+
+#if 1
+    // quintic interpolation
+    vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+#else
+    // cubic interpolation
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    vec2 du = 6.0 * f * (1.0 - f);
+#endif    
+
+    vec2 ga = hash22(i + vec2(0.0, 0.0));
+    vec2 gb = hash22(i + vec2(1.0, 0.0));
+    vec2 gc = hash22(i + vec2(0.0, 1.0));
+    vec2 gd = hash22(i + vec2(1.0, 1.0));
+
+    float va = dot(ga, f - vec2(0.0, 0.0));
+    float vb = dot(gb, f - vec2(1.0, 0.0));
+    float vc = dot(gc, f - vec2(0.0, 1.0));
+    float vd = dot(gd, f - vec2(1.0, 1.0));
+
+    return vec3(va + u.x * (vb - va) + u.y * (vc - va) + u.x * u.y * (va - vb - vc + vd),   // value
+        ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd) +  // derivatives
+        du * (u.yx * (va - vb - vc + vd) + vec2(vb, vc) - va));
+}
+
+
+// begin:  gradient noise
+
+vec2 grad(ivec2 z)  // replace this anything that returns a random vector
+{
+    // 2D to 1D  (feel free to replace by some other)
+    int n = z.x + z.y * 11111;
+
+    // Hugo Elias hash (feel free to replace by another one)
+    n = (n << 13) ^ n;
+    n = (n * (n * n * 15731 + 789221) + 1376312589) >> 16;
+
+#if 0
+
+    // simple random vectors
+    return vec2(cos(float(n)), sin(float(n)));
+
+#else
+
+    // Perlin style vectors
+    n &= 7;
+    vec2 gr = vec2(n & 1, n >> 1) * 2.0 - 1.0;
+    return (n >= 6) ? vec2(0.0, gr.x) :
+        (n >= 4) ? vec2(gr.x, 0.0) :
+        gr;
+#endif                              
+}
+
+float gradientNoise(vec2 p)
+{
+    ivec2 i = ivec2(floor(p));
+    vec2 f = fract(p);
+
+    vec2 u = f * f * (3.0 - 2.0 * f); // feel free to replace by a quintic smoothstep instead
+
+    return mix(mix(dot(grad(i + ivec2(0, 0)), f - vec2(0.0, 0.0)),
+        dot(grad(i + ivec2(1, 0)), f - vec2(1.0, 0.0)), u.x),
+        mix(dot(grad(i + ivec2(0, 1)), f - vec2(0.0, 1.0)),
+            dot(grad(i + ivec2(1, 1)), f - vec2(1.0, 1.0)), u.x), u.y);
+}
+
+// end: gradient noise
+
+
+// begin: wave noise
+vec2 simpleGrad(vec2 n) { return sin(n.x * n.y * vec2(12, 17) + vec2(1, 2)); }
+//vec2 simpleGrad( vec2 n ) { return sin(n.x*n.y+vec2(0,1.571)); } // if you want the gradients to lay on a circle
+
+// the main advantage is that it can generate a wromy look, as
+// in robobo1221's original shader, by changing the kF constant to be closer to 6
+float waveNoise(vec2 p)
+{
+    const float kF = 2.0;  // make 6 to see worms
+
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(sin(kF * dot(p, simpleGrad(i + vec2(0, 0)))),
+        sin(kF * dot(p, simpleGrad(i + vec2(1, 0)))), f.x),
+        mix(sin(kF * dot(p, simpleGrad(i + vec2(0, 1)))),
+            sin(kF * dot(p, simpleGrad(i + vec2(1, 1)))), f.x), f.y);
+}
+// end: wave noise
+
+// begin: compact noise
+float noise(vec2 x)
+{
+    vec2 p = floor(x);
+    vec2 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    float n = p.x + p.y * 57.0;
+    return mix(mix(hash11(n + 0.0), hash11(n + 1.0), f.x),
+        mix(hash11(n + 57.0), hash11(n + 58.0), f.x), f.y);
+}
+// end: compact noise
+
+
+
+
+
+float fbm(vec2 p)
+{
+    float f = 0.0;
+    mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+
+    // convert back when in glsl
+
+    /*f = 0.5000 * noise(p); p = m * p;
+    f += 0.2500 * noise(p); p = m * p;
+    f += 0.1250 * noise(p); p = m * p;
+    f += 0.0625 * noise(p); p = m * p;*/
+
+    f = 0.5000 * noise(p); p = mul(p, m);
+    f += 0.2500 * noise(p); p = mul(p, m);
+    f += 0.1250 * noise(p); p = mul(p, m);
+    f += 0.0625 * noise(p); p = mul(p, m);
+    return f;
+}

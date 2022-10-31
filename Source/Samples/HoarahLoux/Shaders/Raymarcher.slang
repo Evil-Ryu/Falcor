@@ -714,7 +714,7 @@ vec3 integrateVolume(vec3 ro, vec3 rd, vec3 scatteringAlbedo, out vec3 weight, o
             // scattering albedo * extinction =  scattering coefficient
             col *= scatteringAlbedo * extinction * accTransmittance;
 
-            // transmittance from pos back to ro
+            // transmittance for current step size
             accTransmittance *= transmittanceHomogeneous(stepSize, extinction);
 
             L.xyz += col;
