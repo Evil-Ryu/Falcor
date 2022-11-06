@@ -39,8 +39,15 @@ struct RyuMaterial
     float transparency;
     float eta;
 
+
     vec3 extinction; // absorption + scattering
     vec3 scatteringAlbedo; // scatteringAlbedo * extinction = scattering coefficient
+
+    // g in Henyey Greenstein phase function, (-1, 1)
+    // backwards scattering (g < 0),
+    // isotropic scattering (g = 0),
+    // forward scattering (g > 0)
+    float g;  
 };
 
 
@@ -105,6 +112,74 @@ vec4 sampleIsotropicPhaseBsdf(vec3 rnd, out vec3 L)
     float pdf = 0.25 / PI;
     L = UniformSampleSphereSimple(rnd);
     vec3 brdf = evaluateIsotropicPhaseBsdf();
+    return vec4(brdf, pdf);
+}
+
+
+
+float HenyeyGreensteinPdf(float costheta, float g)
+{
+    float g1 = 1. + g * g;
+    float g2 = 1. - g * g;
+    return 0.25 * g2 / (PI * pow(g1 - 2.0f * g * costheta, 1.5));
+}
+
+float HenyeyGreensteinInvertCdf(float xi, float g)
+{
+    float g1 = 1. + g * g;
+    float g2 = 1. - g * g;
+    float g3 = .5 / g;
+
+    float t = g2 / (1. - g + 2. * g * xi);
+    return g3 * (g1 - t * t);
+}
+
+// L is the sampled outgoing direction
+// return: the brdf value
+vec3 EvaluateHenyeyGreenstein(vec3 L, vec3 V, float g)
+{
+    bool isotropic = g == 0.;
+
+    float pdf = 1.;
+
+    if (isotropic)
+    {
+        pdf = 0.25 / PI;
+    }
+    else
+    {
+        float cosTheta = dot(-V, L);
+        pdf = HenyeyGreensteinPdf(cosTheta, g);
+    }
+
+    return vec3(pdf);
+}
+
+vec4 sampleHenyeyGreenstein(vec3 rnd, in vec3 V, out vec3 L, float g)
+{
+    bool isotropic = g == 0.;
+
+    float pdf = 1.;
+
+    if (isotropic)
+    {
+        sampleIsotropicPhaseBsdf(rnd, L);
+        pdf = 0.25 / PI;
+    }
+    else
+    {
+        float phi = rnd.x * 2. * PI;
+        float cosTheta = HenyeyGreensteinInvertCdf(rnd.y, g);
+        float sinTheta = sqrt(1. - cosTheta * cosTheta);
+        float3x3 tangentBasis = GetTangentBasis(-V);
+
+        L = sinTheta * sin(phi) * tangentBasis[0] + sinTheta * cos(phi) * tangentBasis[1] +
+            cosTheta * (-V);
+        pdf = HenyeyGreensteinPdf(cosTheta, g);
+    }
+
+    vec3 brdf = EvaluateHenyeyGreenstein(L, V, g);
+
     return vec4(brdf, pdf);
 }
 

@@ -22,7 +22,7 @@ layout(binding = 0) SamplerState iChannel0Sampler : register(s0);
 layout(binding = 1) texture2D iPass0Output : register(t0);
 
 #define FAR 100.
-#define MAX_BOUNCES 10
+#define MAX_BOUNCES 20
 #define INTER_THRESHOLD .001
 #define EPSILON 			0.0001
 #define MARCHING_STEPS 256
@@ -34,6 +34,7 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 #define MAT_CHEKERBOARD 0.
 #define MAT_GLASS_SINGLE_SCATTER 4.
 #define MAT_GLASS 5.
+#define MAT_CLOUD 6.
 
 #include "Include/CommonDefines.slangh"
 #include "Include/SDF-MandelBox.slangh"
@@ -104,6 +105,7 @@ RyuMaterial getMaterial(float id, vec3 pos)
     mat.anisotropy = 0.;
     mat.transparency = 0.;
     mat.eta = 1.;
+    mat.g = 0.;
 
     if (id == 0.)
     {
@@ -129,14 +131,15 @@ RyuMaterial getMaterial(float id, vec3 pos)
     else if (id == MAT_GLASS_SINGLE_SCATTER)
     {
         mat.type = MAT_TYPE_TRANSLUCENT;
-        mat.albedo = vec3(0.1);
-        mat.specularCol = vec3(0.5);
+        mat.albedo = vec3(0.0);
+        mat.specularCol = vec3(0.0);
         mat.roughness = 0.1;
         mat.shininess = 128.;
-        mat.transparency = .5;
-        mat.eta = 1. / 1.5;
-        mat.extinction = vec3(0.5);
-        mat.scatteringAlbedo = vec3(.9);
+        mat.transparency = 1.;
+        mat.eta = 1.;
+        mat.extinction = vec3(0.9);
+        mat.scatteringAlbedo = vec3(.5);
+        mat.g = -.5;
     }
     else if (id == MAT_GLASS)
     {
@@ -149,6 +152,19 @@ RyuMaterial getMaterial(float id, vec3 pos)
         mat.eta = 1. / 1.5;
         mat.extinction = vec3(0.5);
         mat.scatteringAlbedo = vec3(.9);
+    }
+    else if (id == MAT_CLOUD)
+    {
+        mat.type = MAT_TYPE_TRANSLUCENT;
+        mat.albedo = vec3(0.0);
+        mat.specularCol = vec3(0.);
+        mat.roughness = 0.1;
+        mat.shininess = 128.;
+        mat.transparency = 1.;
+        mat.eta = 1.;
+        mat.extinction = vec3(.9);
+        mat.scatteringAlbedo = vec3(.5);
+        mat.g = -0.5;
     }
 
 
@@ -247,13 +263,13 @@ float apollonian(vec3 p)
 
 vec2 mapVolume(vec3 p)
 {
-    float d = length(p+vec3(0., -.1, 0.)) - 1.;
+    float d = length(p + vec3(0., -.1, 0.)) - 1.;// +0.3 * fbm3d(p * 5.);
     //float d = sdTorus(p, vec2(1., .3));
     //float d = sdBox(p, vec3(1.));
     // thin shell and hollow inside
     //d = max(d, -(d + 0.1));
 
-    return vec2(d, MAT_GLASS_SINGLE_SCATTER);
+    return vec2(d, MAT_CLOUD);
 }
 
 vec2 map(vec3 p)
@@ -512,7 +528,8 @@ vec4 sampleBsdf(
 
     if (hitVolumeParticle)
     {
-        brdfAndPdf = sampleIsotropicPhaseBsdf(hash31(seed++), L);
+        //brdfAndPdf = sampleIsotropicPhaseBsdf(hash31(seed++), L);
+        brdfAndPdf = sampleHenyeyGreenstein(hash31(seed++), V, L, mat.g);
     }
     else
     {
@@ -1016,6 +1033,7 @@ vec3 scene(vec3 ro, vec3 rd)
 
             if (matId == MAT_GLASS_SINGLE_SCATTER)
             {
+                // As it only has to sample one single point in the volume
                 hitVolumeParticle = false;
                 float maxExtinction = 1.;
                 // vec3 LVolume = integrateBeersLawVolume(nextRo, nextRd, n, mat.extinction, transmittance, weight, hit);
