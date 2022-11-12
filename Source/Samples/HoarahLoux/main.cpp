@@ -91,11 +91,12 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    mPasses[0].mPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Raymarcher.slang");
-    mPasses[0].mShaderPath = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Raymarcher.slang";
+    mPasses[0].mPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/Raymarcher.slang");
 
-    mPasses[1].mPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/PathtracerPost.slang");
-    mPasses[1].mShaderPath = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/PathtracerPost.slang";
+    mPasses[0].mShaderPath = "Raymarcher.slang";
+
+    mPasses[1].mPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/PathtracerPost.slang");
+    mPasses[1].mShaderPath = "PathtracerPost.slang";
 
 
     createFbos(DEFAULT_WIDTH, DEFAULT_HEIGHT);
@@ -104,8 +105,8 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
     mControllableVars.resize(MAX_CONTROLLABLE_VARS);
 
     // create the builtin  passes
-    mBlitPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/__InternalBlit.ps.slang");
-    mClearPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/__InternalClear.ps.slang");
+    mBlitPass = FullScreenPass::create("Samples/HoarahLoux/__InternalBlit.ps.slang");
+    mClearPass = FullScreenPass::create("Samples/HoarahLoux/__InternalClear.ps.slang");
 
 
     // camera
@@ -268,6 +269,12 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
 }
 
 
+static std::string getFilenameFromPath(const std::string& path)
+{
+    std::size_t found = path.find_last_of("/\\");
+    return path.substr(found + 1);
+}
+
 // actually replace current pass atm
 void ShaderEditor::setPass(const int index)
 {
@@ -285,7 +292,8 @@ void ShaderEditor::setPass(const int index)
     if (openFileDialog(filterVec, path))
     {
         mPasses[index].mPass = FullScreenPass::create(path);
-        mPasses[index].mShaderPath = path.string();
+        std::string pathStr = path.string();
+        mPasses[index].mShaderPath = getFilenameFromPath(path.string());
         mPasses[index].mActive = true;
     }
 }
@@ -394,7 +402,8 @@ bool ShaderEditor::onKeyEvent(const KeyboardEvent& keyEvent)
             switch(keyEvent.key)
             {
             case Input::Key::Space:
-            {    gpFramework->pauseRenderer(!gpFramework->isRendererPaused());
+            {
+                gpFramework->pauseRenderer(!gpFramework->isRendererPaused());
                 break;
             }
             case Input::Key::Enter:

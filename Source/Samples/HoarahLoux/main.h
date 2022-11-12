@@ -59,6 +59,7 @@ private:
     std::vector<Camera::SharedPtr> mCameras;
     float mCameraSpeed = 1.f;
 
+
     // for debug
     Texture::SharedPtr mDebugTexture;
 

@@ -729,7 +729,7 @@ vec3 integrateVolume(vec3 ro, vec3 rd, vec3 scatteringAlbedo, out vec3 weight, o
     totalTransmittance = accTransmittance;
     weight = vec3(1.);
     return L.xyz;
-}
+} 
 
 vec3 scene(vec3 ro, vec3 rd)
 {
