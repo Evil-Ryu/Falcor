@@ -1,0 +1,29 @@
+#pragma once
+
+#include "GLSLDefines.slangh"
+
+
+struct Ray
+{
+    vec3 ro;
+    vec3 rd;
+};
+
+Ray createRay(vec3 o, vec3 d)
+{
+    Ray r;
+    r.ro = o;
+    r.rd = d;
+    return r;
+}
+
+struct PathTracingContext
+{
+    Ray ray;
+    vec3 pos;
+    vec3 V;
+
+    float distanceFactor;
+
+};
+

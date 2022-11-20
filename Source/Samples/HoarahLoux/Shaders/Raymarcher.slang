@@ -133,7 +133,7 @@ RyuMaterial getMaterial(float id, vec3 pos)
         mat.shininess = 128.;
         mat.transparency = .5;
         mat.eta = 1. / 1.5;
-        mat.extinction = vec3(0.5);
+        mat.extinctionCoeff = vec3(0.5);
         mat.scatteringAlbedo = vec3(.9);
     }
     else if (id == MAT_GLASS)
@@ -145,7 +145,7 @@ RyuMaterial getMaterial(float id, vec3 pos)
         mat.shininess = 128.;
         mat.transparency = .5;
         mat.eta = 1. / 1.5;
-        mat.extinction = vec3(0.5);
+        mat.extinctionCoeff = vec3(0.5);
         mat.scatteringAlbedo = vec3(.9);
     }
 
@@ -346,7 +346,7 @@ vec3 shadowRay(vec3 ro, vec3 rd, float dist, RyuMaterial mat)
         float boundaryDist = intersectVolumeBoundary(ro, rd, dist).x;
         float transmissionDist = min(boundaryDist, occluderDist);
 
-        beamTransmittance = transmittanceHomogeneous(transmissionDist, mat.extinction);
+        beamTransmittance = transmittanceHomogeneous(transmissionDist, mat.extinctionCoeff);
     }
     else
     {
@@ -846,13 +846,13 @@ vec3 scene(vec3 ro, vec3 rd)
 
             hitVolumeParticle = false;
             float maxExtinction = 1.;
-            // vec3 LVolume = integrateBeersLawVolume(nextRo, nextRd, n, mat.extinction, transmittance, weight, hit);
+            // vec3 LVolume = integrateBeersLawVolume(nextRo, nextRd, n, mat.extinctionCoeff, transmittance, weight, hit);
             //Lo += LVolume * weight * throughput;
 
                 //svec3 LVolume = integrateBeersLawHeterVolume(nextRo, nextRd, n, maxExtinction, transmittance, weight, hit);
                 //Lo += LVolume * weight * throughput;
 
-            /* vec3 LVolume = integrateHomogeneousVolume(nextRo, nextRd, n, mat.extinction, mat.scatteringAlbedo, transmittance, weight, hit);
+            /* vec3 LVolume = integrateHomogeneousVolume(nextRo, nextRd, n, mat.extinctionCoeff, mat.scatteringAlbedo, transmittance, weight, hit);
                 Lo += LVolume * weight * throughput;*/
 
             //vec3 LVolume = integrateHeterogeneousVolume(nextRo, nextRd, n, maxExtinction, mat.scatteringAlbedo, transmittance, weight, hit);

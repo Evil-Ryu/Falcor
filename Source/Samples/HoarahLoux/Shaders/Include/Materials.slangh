@@ -41,8 +41,10 @@ struct RyuMaterial
     float eta;
 
 
-    vec3 extinction; // absorption + scattering
-    vec3 scatteringAlbedo; // scatteringAlbedo * extinction = scattering coefficient
+    vec3 absorptionCoeff;
+    vec3 scatteringCoeff;
+    vec3 extinctionCoeff; // = absorption + scattering
+    vec3 scatteringAlbedo; // scatteringAlbedo = scattering / extinction
     bool heteregeneous;
     // g in Henyey Greenstein phase function, (-1, 1)
     // backwards scattering (g < 0),
@@ -71,7 +73,7 @@ void MakeDefaultMaterial(out RyuMaterial mat)
     mat.transparency = 0.;
     mat.eta = 1.;
 
-    mat.extinction = vec3(0.);
+    mat.extinctionCoeff = vec3(0.);
     mat.scatteringAlbedo = vec3(1.);
 }
 

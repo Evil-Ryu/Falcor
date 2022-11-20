@@ -43,6 +43,7 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 #define MAT_CLOUD_BOUND 7.
 
 #include "Include/CommonDefines.slangh"
+#include "Include/PathtracingCommon.slangh"
 #include "Include/SDF-MandelBox.slangh"
 //#include "Include/SDF-BurningShip3D.slangh"
 #include "Include/Randoms.slangh"
@@ -61,8 +62,14 @@ static vec4 debugVec = vec4(0.);
 //static float sunSize = 0.53; //degree
 static float sunSize = .53;
 static float sunAngularDiameterCos = cos(sunSize * PI / 180.0);
-static vec3 sunCol = vec3(1.1, .8, .5) * 5.;
-static vec3 skyCol = vec3(0.1, .5, 1.) * .2;
+//static vec3 sunCol = vec3(1.1, .8, .5) * 5.;
+//static vec3 sunCol = vec3(244., 233., 155.) / 255. * 5.;
+//static vec3 skyCol = vec3(0.1, .5, 1.) * .2;
+
+// for verify
+static vec3 sunCol = vec3(1.);
+static vec3 skyCol = vec3(1.);
+
 static vec3 sunDir = normalize(vec3(1., 1., -1.));
 
 
@@ -145,9 +152,12 @@ RyuMaterial getMaterial(float id, vec3 pos)
         mat.shininess = 128.;
         mat.transparency = 1.;
         mat.eta = 1.;
-        mat.extinction = vec3(.9);
-        mat.scatteringAlbedo = vec3(.1);
-        mat.g = -.5;
+
+        mat.absorptionCoeff = vec3(0.);
+        mat.scatteringCoeff = vec3(.5);
+        mat.extinctionCoeff = mat.absorptionCoeff + mat.scatteringCoeff;
+        mat.scatteringAlbedo = mat.scatteringCoeff / mat.extinctionCoeff;
+        mat.g = 0.;
     }
     else if (id == MAT_GLASS)
     {
@@ -158,8 +168,6 @@ RyuMaterial getMaterial(float id, vec3 pos)
         mat.shininess = 128.;
         mat.transparency = .5;
         mat.eta = 1. / 1.5;
-        mat.extinction = vec3(0.5);
-        mat.scatteringAlbedo = vec3(.3);
         mat.volumeMatId = MAT_GLASS_SINGLE_SCATTER;
     }
     else if (id == MAT_CLOUD)
@@ -171,9 +179,11 @@ RyuMaterial getMaterial(float id, vec3 pos)
         mat.shininess = 128.;
         mat.transparency = 1.;
         mat.eta = 1.;
-        mat.extinction = vec3(.5);
-        mat.scatteringAlbedo = vec3(.8);
-        mat.g = -0.5;
+        mat.absorptionCoeff = vec3(0.);
+        mat.scatteringCoeff = vec3(2000.);
+        mat.extinctionCoeff = mat.absorptionCoeff + mat.scatteringCoeff;
+        mat.scatteringAlbedo = mat.scatteringCoeff / mat.extinctionCoeff;
+        mat.g = 0.;
         mat.heteregeneous = true;
     }
     else if (id == MAT_CLOUD_BOUND)
@@ -228,9 +238,14 @@ float fbm3d(vec3 p)
 
 }
 
+// density should be multiplied with absorptionCoeff / scatteringCoeff / extinction ... later
 float sampleVolume(vec3 p)
 {
-    return 1. - smoothstep(0.0, .3, fbm3d(p * 4.));
+//    return 1. - smoothstep(0.0, .3, fbm3d(p * 4.));
+
+    float density = 1. - smoothstep(0.3, .4, fbm3d(p * 4.));
+
+    return density;
 }
 
 vec2 mandelbulb(vec3 p)
@@ -283,13 +298,13 @@ float apollonian(vec3 p)
 
 vec2 mapVolume(vec3 p)
 {
-    float d = length(p + vec3(0., -.1, 0.)) - 1.;// +0.3 * fbm3d(p * 5.);
+    float d = length(p + vec3(0., -1., 0.)) - 1.;// +0.3 * fbm3d(p * 5.);
     //float d = sdTorus(p, vec2(1., .3));
     //float d = sdBox(p, vec3(1.));
     // thin shell and hollow inside
     //d = max(d, -(d + 0.05));
 
-    return vec2(d, MAT_GLASS);
+    return vec2(d, MAT_CLOUD_BOUND);
 }
 
 vec2 map(vec3 p)
@@ -308,7 +323,9 @@ vec2 map(vec3 p)
     vec2 res = mapVolume(p);
     float d = res.x, id = res.y;
 
-    float d2 = abs(p.y + 1.1)-0.1;
+    return vec2(d, id);
+
+    float d2 = abs(p.y + 1.1) - 0.1;
 
     //if (d2 < d) { d = d2; id = 1.; }
 
@@ -403,11 +420,12 @@ vec3 shadowRay(vec3 ro, vec3 rd, float dist, RyuMaterial mat, bool insideVolume)
     if (insideVolume)
     {
         float boundaryDist = intersectVolumeBoundary(ro, rd, dist).x;
-        float transmissionDist = max(0., min(boundaryDist, t));
+        float transmissionDist = boundaryDist;// max(0., min(boundaryDist, t));
 
         if (mat.heteregeneous)
         {
-            beamTransmittance = raymarchingTransmittance(ro, rd, 10, transmissionDist / 10.);
+            vec3 occluderPos = ro + transmissionDist * rd;
+            beamTransmittance = estimateTransmittance(ro, occluderPos);
         }
         else
         {
@@ -439,7 +457,7 @@ vec4 sampleLight(vec3 pos, vec3 V, vec3 n, RyuMaterial mat, bool hitVolumePartic
     // there is no costheta term for volume particle lighting
     if (!hitVolumeParticle)
     {
-        costheta = dot(sunDir, n);
+        costheta = 1.;// dot(sunDir, n);
         pos += (INTER_THRESHOLD * 2.) * n;
 
         if (costheta <= 0.)
@@ -451,7 +469,7 @@ vec4 sampleLight(vec3 pos, vec3 V, vec3 n, RyuMaterial mat, bool hitVolumePartic
 
     if (lightSelectPdf < EPSILON) return vec4(0);
 
-    vec3 shadow = shadowRay(pos, rd, 50., mat, hitVolumeParticle);
+    vec3 shadow = vec3(1.);// shadowRay(pos, rd, 50., mat, hitVolumeParticle);
 
     vec3 brdfAndCos = vec3(0.);
 
@@ -691,7 +709,7 @@ vec3 BeersLawHeterTransmittance(vec3 p0, vec3 p1, float maxAbsorption)
 
 vec3 integrateBeersLawHeterVolume(vec3 ro, vec3 rd, vec3 n, float maxAbsorption, inout vec3 transmittance, out vec3 weight, out vec2 hit)
 {
-    hit = intersect(ro, rd, FAR);
+    hit = intersectVolumeBoundary(ro, rd, FAR);
     float t = hit.x;
     // problematic, the bound geometry of the volume may not be water tight?
     // which is not likely in raymarching
@@ -787,7 +805,7 @@ vec3 integrateHomogeneousVolume(vec3 ro, vec3 rd, vec3 n, vec3 extinction, vec3 
 //
 //
 // currently doesn't support other opaque objects inside the volume
-vec3 integrateHeterogeneousVolume(vec3 ro, vec3 rd, vec3 n, float maxExtinction, vec3 scatteringAlbedo, inout vec3 totalTransmittance, out vec3 weight, out vec2 hit)
+vec3 integrateSingleScatterHeterVolume(vec3 ro, vec3 rd, vec3 n, float maxExtinction, vec3 scatteringAlbedo, inout vec3 totalTransmittance, out vec3 weight, out vec2 hit)
 {
     hit = intersectVolumeBoundary(ro, rd, FAR);
     float totalDistance = hit.x;
@@ -807,8 +825,6 @@ vec3 integrateHeterogeneousVolume(vec3 ro, vec3 rd, vec3 n, float maxExtinction,
         // make sure it terminates in the volume
         if (t > totalDistance)
         {
-            totalTransmittance = vec3(1.);
-            weight = vec3(1.);
             break;
         }
 
@@ -867,7 +883,7 @@ vec3 integrateMultiScatterHomogeneousVolume(vec3 ro, vec3 rd, vec3 n, RyuMateria
     float totalDistance = hit.x;
 
     float rnd = hash11(seed++);
-    float scatterDistance = -log(1.0 - rnd) / avgChannels(mat.extinction);
+    float scatterDistance = -log(1.0 - rnd) / avgChannels(mat.extinctionCoeff);
 
     // if scatter point is inside the volume
     if (scatterDistance < totalDistance)
@@ -876,17 +892,17 @@ vec3 integrateMultiScatterHomogeneousVolume(vec3 ro, vec3 rd, vec3 n, RyuMateria
         hit.y = matId;  // as ray will stay inside volume, stick to the same volume material for the next bounce
         hitVolumeParticle = true;
 
-        totalTransmittance = transmittanceHomogeneous(scatterDistance, mat.extinction);
+        totalTransmittance = transmittanceHomogeneous(scatterDistance, mat.extinctionCoeff);
 
         // pdf of sampling T(t)
-        vec3 pdf = mat.extinction * totalTransmittance;
+        vec3 pdf = mat.extinctionCoeff * totalTransmittance;
 
         // scattering coefficient * (1./pdf)
-        weight = mat.scatteringAlbedo * mat.extinction / pdf;
+        weight = mat.scatteringAlbedo * mat.extinctionCoeff / pdf;
     }
     else
     {
-        totalTransmittance = transmittanceHomogeneous(totalDistance, mat.extinction);
+        totalTransmittance = transmittanceHomogeneous(totalDistance, mat.extinctionCoeff);
         hitVolumeParticle = false;
 
         vec3 pdf = totalTransmittance;
@@ -898,39 +914,93 @@ vec3 integrateMultiScatterHomogeneousVolume(vec3 ro, vec3 rd, vec3 n, RyuMateria
 }
 
 
-
-// raymarching volume
-
-// works for heterogeneous volume
-// asumming volume is piecewise homogeneous
-#if 0
-vec3 raymarchingTransmittance(vec3 p0, vec3 p1, float stepSize)
+// Multi scattering heterogeneous volume
+//
+//
+// 
+// implements different methods of calculating transmittance
+vec3 estimateTransmittance(vec3 p0, vec3 p1)
 {
-    vec3 dir = p1 - p0;
     float distance = length(p1 - p0);
-    dir *= 1. / distance;
-    int nsteps = int(ceil(distance / stepSize));
+    vec3 dir = (p1 - p0) / distance;
 
-    // 
-    float adjustedStepSize = distance / float(nsteps);
+    vec3 transmittance = vec3(1.);
 
-    vec3 throughput = vec3(1.);
-    float t = 0.;
-    for (int i = 0; i < nsteps; ++i)
+    // raymarching
+
+    uint nsteps = 16;
+    float stepDist = distance / float(nsteps);
+    float t = stepDist * 0.5;
+    for (uint i = 0; i < nsteps; ++i)
     {
         vec3 p = p0 + t * dir;
         vec3 extinction = vec3(sampleVolume(p));
-        throughput *= transmittanceHomogeneous(adjustedStepSize, extinction);
-        t += adjustedStepSize;
+        transmittance *= transmittanceHomogeneous(stepDist, extinction);
+        t += stepDist;
     }
 
-    return throughput;
+    return transmittance;
 }
-#endif
+
+vec3 integrateMultiScatterHeterVolume(vec3 ro, vec3 rd, vec3 n, float maxExtinction, float matId, RyuMaterial mat, inout vec3 totalTransmittance, out vec3 weight, out vec2 hit, out bool hitVolumeParticle)
+{
+    hit = intersectVolumeBoundary(ro, rd, FAR);
+    float totalDistance = hit.x;
+
+    vec3 scatterPos = vec3(0.);
+    vec3 extinction = vec3(0.);
+
+    bool terminated = false;
+    float t = 0;
+    do {
+        float zeta = hash11(seed++);
+        t = t - log(1 - zeta) / maxExtinction;
+        if (t > totalDistance)
+        {
+            break; // Did not terminate in the volume
+        }
+
+        scatterPos = ro + t * rd;
+
+        extinction = mat.extinctionCoeff * sampleVolume(scatterPos);
+
+        float rnd = hash11(seed++);
+        if (rnd < avgChannels(extinction) / maxExtinction)
+        {
+            terminated = true;
+        }
+
+    } while (!terminated);
+
+
+    // if scatter point is inside the volume
+    // do not calculate the direct lighting here for multi scattering
+    if (terminated)
+    {
+        hit.x = t;
+        hit.y = matId; // as ray will stay inside volume, stick to the same volume material for the next bounce
+        hitVolumeParticle = true;
+
+        vec3 transmittance = vec3(1.);
+        vec3 pdf = extinction * transmittance;
+        weight = mat.scatteringAlbedo * extinction / pdf;
+
+        totalTransmittance = vec3(1.);
+    }
+    else
+    {
+        totalTransmittance = vec3(1.);
+
+        vec3 pdf = totalTransmittance;
+        weight = 1.0 / pdf;
+    }
+
+    return vec3(0.); // No estimate of radiance
+}
 
 
 // using this form is to reduce computation cost, marching to find volumeboudary at each position is too costly
-vec3 raymarchingTransmittance(vec3 p0, vec3 dir, int nsteps, float stepSize)
+vec3 raymarchingTransmittance(vec3 p0, vec3 dir, int nsteps, float stepSize, RyuMaterial mat)
 {
     // TODO: dither
     float adjustedStepSize = stepSize;
@@ -940,7 +1010,7 @@ vec3 raymarchingTransmittance(vec3 p0, vec3 dir, int nsteps, float stepSize)
     for (int i = 0; i < nsteps; ++i)
     {
         vec3 p = p0 + t * dir;
-        vec3 extinction = vec3(sampleVolume(p));
+        vec3 extinction = mat.extinctionCoeff * sampleVolume(p);
         throughput *= transmittanceHomogeneous(adjustedStepSize, extinction);
         t += adjustedStepSize;
     }
@@ -949,7 +1019,7 @@ vec3 raymarchingTransmittance(vec3 p0, vec3 dir, int nsteps, float stepSize)
 }
 
 #define VOLUME_MARCHING_STEPS 64
-vec3 integrateVolumeRayMarching(vec3 ro, vec3 rd, vec3 scatteringAlbedo, out vec3 weight, out vec3 totalTransmittance, out vec2 hit)
+vec3 integrateVolumeRayMarching(vec3 ro, vec3 rd, RyuMaterial mat, out vec3 weight, out vec3 totalTransmittance, out vec2 hit)
 {
     float rnd = hash11(seed++);
     vec4 L = vec4(0., 0., 0., 1.);
@@ -965,17 +1035,17 @@ vec3 integrateVolumeRayMarching(vec3 ro, vec3 rd, vec3 scatteringAlbedo, out vec
     for (int i = 0; i < VOLUME_MARCHING_STEPS; ++i)
     {
         vec3 p = ro + t * rd;
-        vec3 extinction = vec3(sampleVolume(p));
+        vec3 extinction = mat.extinctionCoeff * sampleVolume(p);
 
         if (any(extinction) > 0.)
         {
             // shadow ray transmittance
-            vec3 beamTransmittance = raymarchingTransmittance(p, sunDir, 10, .1);
+            vec3 beamTransmittance = raymarchingTransmittance(p, sunDir, 10, .1, mat);
 
             vec3 bsdf = evaluateIsotropicPhaseBsdf();
             vec3 col = sunCol * bsdf.xyz * beamTransmittance;
             // scattering albedo * extinction =  scattering coefficient
-            col *= scatteringAlbedo * extinction * accTransmittance;
+            col *= mat.scatteringAlbedo * extinction * accTransmittance;
 
             // transmittance for current step size
             accTransmittance *= transmittanceHomogeneous(stepSize, extinction);
@@ -1005,70 +1075,7 @@ vec4 nee(vec3 rd, vec3 pos, vec3 n, RyuMaterial mat, bool hitVolumeParticle)
     return directLighting;
 }
 
-/*
-vec4 sampleBtdf(
-    vec3 rd,
-    vec3 pos,
-    vec3 worldGeomNormal,
-    vec3 worldNormal,
-    RyuMaterial mat,
-    float matId,
-    int i,
-    out vec3 nextRd,
-    out vec3 nextRo,
-    out float nextEvent,
-    out bool inVolume
-)
-{    
-    vec4 btdfAndPdf = vec4(0., 0., 0., 1.);
 
-    vec3 n = worldNormal;
-
-    float eta = mat.eta;
-    if (distanceFactor < 0.)
-    {
-        eta = 1. / eta;
-    }
-
-    vec3 refr = refract(rd, n, eta);
-
-  
-    // always pick transmission if translucent
-    // so the pdf of transimission event should be 1
-    if (mat.transparency > 0.01)
-    {
-        // internal reflection
-        if (dot(refr, refr) < 0.001)
-        {
-            nextRd = reflect(rd, n);  // perfect reflection atm
-            nextRo = pos + 0.01 * n;
-
-            btdfAndPdf.xyz = mat.transparency;
-            nextEvent = EVENT_REFLECTION;
-        }
-        else
-        {
-            distanceFactor = -distanceFactor;
-            inVolume = distanceFactor < 0;
-
-            eta = 1. / eta;
-
-            nextRd = refr;
-            nextRo = pos - 0.01 * n;
-
-            btdfAndPdf.xyz = mat.transparency;
-            nextEvent = EVENT_TRANSMISSION;
-        }
-    }
-    else
-    {
-        btdfAndPdf = sampleBsdf(pos, worldGeomNormal, worldNormal, -rd, mat, nextRd);
-        nextEvent = EVENT_REFLECTION;
-    }
-
-    return btdfAndPdf;
-}
-*/
 
 vec3 scene(vec3 ro, vec3 rd)
 {
@@ -1111,26 +1118,10 @@ vec3 scene(vec3 ro, vec3 rd)
         // can use mis to optimize
         vec4 directLightingAndPdf = nee(rd, pos, n, mat, hitVolumeParticle);
 
-        // direct part, NEE, use MIS to optimize
-        // returns the new rd for the next event and the brdf of the inirect part
- //       vec4 lightingAndPdf = evaluateLightingAndMisSampling(rd, pos, n, matId, nextRd, brdf);
-
         // throughput = A0C0..An-1Cn-1,  direct = AnCnLn
         Lo += throughput * directLightingAndPdf.xyz;
 
         float nextEvent = EVENT_REFLECTION;
-        
-        /*vec4 btdfAndPdf = sampleBtdf(rd,
-                                    pos,
-                                    n,
-                                    n,
-                                    mat,
-                                    i,
-                                    matId,
-                                    nextRd,
-                                    nextRo,
-                                    nextEvent,
-                                    inVolume);*/
 
         vec4 btdfAndPdf = vec4(0., 0., 0., 1.);
 
@@ -1180,7 +1171,7 @@ vec3 scene(vec3 ro, vec3 rd)
 
 
 
-        // change volume boundary material to it's volume
+        // change volume boundary material to its volume
         float currentVolumeMatId = -1.;
         RyuMaterial volumeMat = mat;
         if (isRayInVolume() && nextEvent == EVENT_TRANSMISSION)
@@ -1196,13 +1187,13 @@ vec3 scene(vec3 ro, vec3 rd)
         if (volumeMat.type == MAT_TYPE_VOLUME)
         {
             vec3 transmittance = vec3(1.);
+            float maxExtinction = max(volumeMat.extinctionCoeff.x, max(volumeMat.extinctionCoeff.y, volumeMat.extinctionCoeff.z));
 
             #if USING_RAYMARCHING_VOLUME
             {
                 hitVolumeParticle = false;
-                float maxExtinction = 1.;
 
-                vec3 LVolume = integrateVolumeRayMarching(nextRo, nextRd, volumeMat.scatteringAlbedo, weight, transmittance, hit);
+                vec3 LVolume = integrateVolumeRayMarching(nextRo, nextRd, volumeMat, weight, transmittance, hit);
                 Lo += LVolume * weight * throughput;
 
                 // for single scattering
@@ -1212,21 +1203,21 @@ vec3 scene(vec3 ro, vec3 rd)
 
             #else
             {
-                if (matId == MAT_GLASS_SINGLE_SCATTER)
+                if (currentVolumeMatId != MAT_CLOUD)
                 {
                     // As it only has to sample one single point in the volume
                     hitVolumeParticle = false;
-                    float maxExtinction = 1.;
-                    //vec3 LVolume = integrateBeersLawVolume(nextRo, nextRd, n, volumeMat.extinction, transmittance, weight, hit);
+                    //vec3 LVolume = integrateBeersLawVolume(nextRo, nextRd, n, volumeMat.extinctionCoeff, transmittance, weight, hit);
                     //Lo += LVolume * weight * throughput;
 
-                     //svec3 LVolume = integrateBeersLawHeterVolume(nextRo, nextRd, n, maxExtinction, transmittance, weight, hit);
-                     //Lo += LVolume * weight * throughput;
+                     // kind of passed white furnace test
+                     vec3 LVolume = integrateBeersLawHeterVolume(nextRo, nextRd, n, maxExtinction, transmittance, weight, hit);
+                     Lo += LVolume * weight * throughput;
 
-                    vec3 LVolume = integrateHomogeneousVolume(nextRo, nextRd, n, volumeMat.extinction, volumeMat.scatteringAlbedo, transmittance, weight, hit);
-                    Lo += LVolume * weight * throughput;
+                    //vec3 LVolume = integrateHomogeneousVolume(nextRo, nextRd, n, volumeMat.extinctionCoeff, volumeMat.scatteringAlbedo, transmittance, weight, hit);
+                    //Lo += LVolume * weight * throughput;
 
-                    /* vec3 LVolume = integrateHeterogeneousVolume(nextRo, nextRd, n, maxExtinction, volumeMat.scatteringAlbedo, transmittance, weight, hit);
+                    /* vec3 LVolume = integrateSingleScatterHeterVolume(nextRo, nextRd, n, maxExtinction, volumeMat.scatteringAlbedo, transmittance, weight, hit);
                      Lo += LVolume * weight * throughput;*/
 
                      // for single scattering
@@ -1234,12 +1225,15 @@ vec3 scene(vec3 ro, vec3 rd)
                 }
                 else
                 {
-                    vec3 LVolume = integrateMultiScatterHomogeneousVolume(nextRo, nextRd, n, volumeMat, currentVolumeMatId, transmittance, weight, hit, hitVolumeParticle);
+                    //vec3 LVolume = integrateMultiScatterHomogeneousVolume(nextRo, nextRd, n, volumeMat, currentVolumeMatId, transmittance, weight, hit, hitVolumeParticle);
                     //Lo += LVolume * weight * throughput;
+                    
+
+                    vec3 LVolume = integrateMultiScatterHeterVolume(nextRo, nextRd, n, maxExtinction, currentVolumeMatId, volumeMat, transmittance, weight, hit, hitVolumeParticle);
 
 
                     // for multi scattering
-                    throughput *= transmittance * weight * btdfAndPdf.xyz / btdfAndPdf.w;
+                    throughput *= transmittance *weight* btdfAndPdf.xyz / btdfAndPdf.w;
                 }
             }
             #endif
