@@ -688,7 +688,7 @@ namespace Falcor
             }
             else
             {
-                static_assert(false, "Unsupported geometry output type in convertCurveGeomData");
+                //static_assert(false, "Unsupported geometry output type in convertCurveGeomData");
             }
 
             return true;
