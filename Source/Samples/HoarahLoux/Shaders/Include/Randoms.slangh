@@ -73,3 +73,28 @@ vec3 hash33(vec3 p)
 
 //----------------------------------------------------------------------------------------
 
+uint wangHash(uint seed)
+{
+    seed = (seed ^ 61) ^ (seed >> 16);
+    seed *= 9;
+    seed = seed ^ (seed >> 4);
+    seed *= 0x27d4eb2d;
+    seed = seed ^ (seed >> 15);
+    return seed;
+}
+
+// with more seeds, e.g use fragcoord.xy for v, s
+// u for a sequential randoms
+float wangHash(uint u, uint v, uint s)
+{
+    // https://www.reedbeta.com/blog/quick-and-easy-gpu-random-numbers-in-d3d11/
+    // https://www.shadertoy.com/view/ldjczd
+    uint seed = (u * 1664525u + v) + s;
+    seed = (seed ^ 61u) ^ (seed >> 16u);
+    seed *= 9u;
+    seed = seed ^ (seed >> 4u);
+    seed *= uint(0x27d4eb2d);
+    seed = seed ^ (seed >> 15u);
+    float value = float(seed) / (4294967296.0);
+    return value;
+}

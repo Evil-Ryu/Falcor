@@ -27,6 +27,22 @@
 #define MAT_TYPE_VOLUME_BOUND 4.
 
 
+struct VolumeContext
+{
+    vec3 absorptionCoeff;
+    vec3 scatteringCoeff;
+    vec3 extinctionCoeff; // = absorption + scattering
+    vec3 scatteringAlbedo; // scatteringAlbedo = scattering / extinction
+    bool heteregeneous;
+    bool multiScatter;
+    // g in Henyey Greenstein phase function, (-1, 1)
+    // backwards scattering (g < 0),
+    // isotropic scattering (g = 0),
+    // forward scattering (g > 0)
+    float g;
+    float volumeMatId;
+};
+
 struct RyuMaterial
 {
     float type;
@@ -46,6 +62,7 @@ struct RyuMaterial
     vec3 extinctionCoeff; // = absorption + scattering
     vec3 scatteringAlbedo; // scatteringAlbedo = scattering / extinction
     bool heteregeneous;
+    bool multiScatter;
     // g in Henyey Greenstein phase function, (-1, 1)
     // backwards scattering (g < 0),
     // isotropic scattering (g = 0),
@@ -121,11 +138,13 @@ vec3 evaluateIsotropicPhaseBsdf()
     float pdf = 0.25 / PI;
     return vec3(pdf, pdf, pdf);
 }
- 
-vec4 sampleIsotropicPhaseBsdf(vec3 rnd, out vec3 L)
+
+
+vec4 sampleIsotropicPhaseBsdf(vec2 rnd, out vec3 L)
 {
-    float pdf = 0.25 / PI;
-    L = UniformSampleSphereSimple(rnd);
+    vec4 res = UniformSampleSphere(rnd);
+    L = res.xyz;
+    float pdf = res.w;
     vec3 brdf = evaluateIsotropicPhaseBsdf();
     return vec4(brdf, pdf);
 }
@@ -170,7 +189,7 @@ vec3 EvaluateHenyeyGreenstein(vec3 L, vec3 V, float g)
     return vec3(pdf);
 }
 
-vec4 sampleHenyeyGreenstein(vec3 rnd, in vec3 V, out vec3 L, float g)
+vec4 sampleHenyeyGreenstein(vec2 rnd, in vec3 V, out vec3 L, float g)
 {
     bool isotropic = g == 0.;
 
