@@ -74,7 +74,7 @@ static vec3 sunCol = vec3(1.);
 static vec3 skyCol = vec3(1.);
 #else
 //static vec3 sunCol = vec3(1.1, .8, .5) * 0.;
-static vec3 sunCol = vec3(244., 233., 155.) / 255. * 1.;
+static vec3 sunCol = vec3(244., 233., 155.) / 255. * 2.;
 static vec3 skyCol = vec3(0.1, .5, 1.) * .2;
 #endif
 
@@ -429,16 +429,30 @@ vec3 estimateTransmittance(vec3 p0, vec3 p1, vec3 extinctionCoeff)
     vec3 transmittance = vec3(1.);
     // raymarching
 
-    uint nsteps = 16;
+    //uint nsteps = 16;
 
-    float stepDist = distance / float(nsteps);
-    float t = stepDist * 0.5;
-    for (uint i = 0; i < nsteps; ++i)
+    //float stepSize = distance / float(nsteps);
+    //float t = stepSize * 0.5;
+
+    // for different thickness, if using the same number of steps, thin volume would have transmittance accumulated more densely than thick volume
+    // which caused thin volume tends to be darker.
+    // so this is a workaround: give constant step size for thin volume, vary step size for thick volume
+    float stepSize = 0.01;
+    float nsteps = distance / stepSize;
+
+    if (nsteps > 32.)
+    {
+        nsteps = 32.;
+        stepSize = distance / nsteps;
+    }
+
+    float t = stepSize * 0.5;
+    for (uint i = 0; i < uint(nsteps); ++i)
     {
         vec3 p = p0 + t * dir;
         vec3 extinction = extinctionCoeff * sampleVolume(p);
-        transmittance *= transmittanceHomogeneous(stepDist, extinction);
-        t += stepDist;
+        transmittance *= transmittanceHomogeneous(stepSize, extinction);
+        t += stepSize;
     }
 
     return transmittance;

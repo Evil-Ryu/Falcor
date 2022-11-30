@@ -6,6 +6,12 @@
 #define DEFAULT_WIDTH 1280
 #define DEFAULT_HEIGHT 720
 
+static std::string getFilenameFromPath(const std::string& path)
+{
+    std::size_t found = path.find_last_of("/\\");
+    return path.substr(found + 1);
+}
+
 ShaderEditor::~ShaderEditor()
 {
 }
@@ -91,12 +97,13 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    mPasses[0].mPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/Raymarcher.slang");
+    std::string path0Str = "Samples/HoarahLoux/Shaders/PathtracerNew.slang";
+    mPasses[0].mPass = FullScreenPass::create(path0Str);
+    mPasses[0].mShaderPath = getFilenameFromPath(path0Str);
 
-    mPasses[0].mShaderPath = "Raymarcher.slang";
-
-    mPasses[1].mPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/PathtracerPost.slang");
-    mPasses[1].mShaderPath = "PathtracerPost.slang";
+    std::string path1Str = "Samples/HoarahLoux/Shaders/PathtracerPost.slang";
+    mPasses[1].mPass = FullScreenPass::create(path1Str);
+    mPasses[1].mShaderPath = getFilenameFromPath(path1Str);
 
 
     createFbos(DEFAULT_WIDTH, DEFAULT_HEIGHT);
@@ -268,12 +275,6 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
     executeBlitPass(pRenderContext, passOutput, pTargetFbo);
 }
 
-
-static std::string getFilenameFromPath(const std::string& path)
-{
-    std::size_t found = path.find_last_of("/\\");
-    return path.substr(found + 1);
-}
 
 // actually replace current pass atm
 void ShaderEditor::setPass(const int index)
