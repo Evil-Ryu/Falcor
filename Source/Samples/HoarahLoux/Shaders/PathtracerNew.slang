@@ -28,7 +28,7 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 #define MAX_BOUNCES 20
 #define INTER_THRESHOLD .001
 #define EPSILON 			0.0001
-#define MARCHING_STEPS 256
+#define MARCHING_STEPS 1024
 #define MARCHING_STEP_SCALE 1.
 #define SHADOWRAY_MARCHING_STEPS 32
 #define SHADOWRAY_MARCHING_STEP_SCALE 1.
@@ -74,8 +74,8 @@ static vec3 sunCol = vec3(1.);
 static vec3 skyCol = vec3(1.);
 #else
 //static vec3 sunCol = vec3(1.1, .8, .5) * 0.;
-static vec3 sunCol = vec3(244., 233., 155.) / 255. * 2.;
-static vec3 skyCol = vec3(0.1, .5, 1.) * .2;
+static vec3 sunCol = vec3(244., 233., 155.) / 255. * .5;
+static vec3 skyCol = vec3(0.1, .5, 1.) * .05;
 #endif
 
 static vec3 sunDir = normalize(vec3(-1., 1., -1.));
@@ -123,7 +123,6 @@ float hqRandom()
     randomState += float(iFrame) + iGlobalTime;
     return rnd;
 }
-
 
 
 bool sameHemisphere(in vec3 n, in vec3 a, in vec3 b)
@@ -212,7 +211,7 @@ RyuMaterial getMaterial(float id, vec3 pos)
         mat.transparency = 1.;
         mat.eta = 1.;
         mat.absorptionCoeff = vec3(0.);
-        mat.scatteringCoeff = vec3(200.);
+        mat.scatteringCoeff = vec3(100.);
         mat.extinctionCoeff = mat.absorptionCoeff + mat.scatteringCoeff;
         mat.scatteringAlbedo = mat.scatteringCoeff / mat.extinctionCoeff;
         mat.g = 0.0;
@@ -277,8 +276,9 @@ float sampleVolume(vec3 p)
 //    return 1. - smoothstep(0.0, .3, fbm3d(p * 4.));
 
     float density = 1. - smoothstep(0.4, .43, fbm3d(p * 4.));// +0.05 * noise3d(p * 50.5));
+    //float density = 1.;
     //float density = .1;
-    density *= 1. - smoothstep(0.9, 1., length(p+vec3(0., -0.2, 0.)));
+    //density *= 1. - smoothstep(0.9, 1., length(p+vec3(0., -0.2, 0.)));
     return density;
 }
 
@@ -331,7 +331,7 @@ float apollonian(vec3 p)
 }
 
 vec2 mapVolume(vec3 p)
-{
+{ 
     float d = length(p + vec3(0., -0.2, 0.)) - 1.;// +0.3 * fbm3d(p * 5.);
     //float d = sdTorus(p, vec2(1., .3));
     //float d = sdBox(p, vec3(1.));
@@ -426,7 +426,6 @@ vec3 estimateTransmittance(vec3 p0, vec3 p1, vec3 extinctionCoeff)
     float distance =  length(p1 - p0);
     vec3 dir = (p1 - p0) / distance;
 
-    vec3 transmittance = vec3(1.);
     // raymarching
 
     //uint nsteps = 16;
@@ -447,6 +446,7 @@ vec3 estimateTransmittance(vec3 p0, vec3 p1, vec3 extinctionCoeff)
     }
 
     float t = stepSize * 0.5;
+    vec3 transmittance = vec3(1.);
     for (uint i = 0; i < uint(nsteps); ++i)
     {
         vec3 p = p0 + t * dir;
@@ -459,24 +459,6 @@ vec3 estimateTransmittance(vec3 p0, vec3 p1, vec3 extinctionCoeff)
 
 }
 
-vec2 intersectVolumeBoundary2(vec3 ro, vec3 rd, float maxDist)
-{
-    float t = INTER_THRESHOLD;
-    vec2 res = vec2(1000);
-
-    for (int i = 0; i < MARCHING_STEPS; ++i)
-    {
-        res = mapVolumeBoundary(ro + t * rd);
-        res.x *= distanceFactor;
-        t += res.x * MARCHING_STEP_SCALE;
-
-        if (res.x < INTER_THRESHOLD || t > maxDist)
-        {
-            break;
-        }
-    }
-    return vec2(t, res.y);
-}
 
 
 // shadow ray with volume transmission
@@ -487,7 +469,7 @@ vec3 shadowRay(vec3 ro, vec3 rd, float dist, RyuMaterial mat, bool insideVolume)
 
     if (insideVolume)
     {
-        float boundaryDist = intersectVolumeBoundary2(ro, rd, dist).x;
+        float boundaryDist = intersectVolumeBoundary(ro, rd, dist).x;
         float transmissionDist = boundaryDist;// max(0., min(boundaryDist, t));
 
         vec3 occluderPos = ro + transmissionDist * rd;
@@ -1100,6 +1082,10 @@ vec3 integrateMultiScatterHeterVolume(vec3 ro, vec3 rd, vec3 n, float maxExtinct
 
     } while (!terminated);
 
+    // for sdf that the distance isn't accurate
+    float d = mapVolume(scatterPos).x;
+    if (d >= 0.)
+        terminated = false;
 
     // if scatter point is inside the volume
     // do not calculate the direct lighting here for multi scattering
@@ -1120,6 +1106,14 @@ vec3 integrateMultiScatterHeterVolume(vec3 ro, vec3 rd, vec3 n, float maxExtinct
         hitVolumeParticle = false;
         totalTransmittance = vec3(1.);
         weight = vec3(1.); // 1. / transmittance (=pdf)
+
+        // make sure the ray is still inside of the volume bound
+      /*  vec3 pos = ro + hit.x * rd;
+        float d = mapVolume(pos).x;
+        if (d > 0.)
+        {
+            hit.x -= d + 0.1;
+        }*/
     }
 
     return vec3(0.); // No estimate of radiance
@@ -1259,11 +1253,13 @@ vec3 scene(vec3 ro, vec3 rd)
             if (!hitVolumeParticle && mat.type == MAT_TYPE_TRANSLUCENT)
             {
                 float eta = mat.eta;
+                bool enterVolume = true;
+
                 if (isRayInVolume())
                 {
                     eta = 1. / eta;
+                    enterVolume = false;
                 }
-
 
                 vec3 refr = refract(rd, n, eta);
                 // internal reflection
@@ -1284,6 +1280,23 @@ vec3 scene(vec3 ro, vec3 rd)
 
                     btdfAndPdf.xyz = mat.transparency;
                     nextEvent = EVENT_TRANSMISSION;
+
+
+                   // if (i == 1)
+                    {
+                        float d = mapVolume(nextRo).x;
+                        if ((d < 0. && !enterVolume) || (d > 0. && enterVolume))
+                        {
+                            nextRo -= (d + 0.1) * n;
+                        }
+
+                        /*d = mapVolume(nextRo).x;
+                        debugTexture[gFragCoord] = float4(d * 200., 0., 0., 1.);
+
+                        if ((d > 0. && !enterVolume) || (d < 0. && enterVolume))
+                            debugTexture[gFragCoord] = float4(0., 1., 0., 1.);*/
+                    }
+
                 }
             }
             else

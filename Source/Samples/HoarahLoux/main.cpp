@@ -1,7 +1,7 @@
 
 #include "main.h"
 
-#define MAX_PASSES 4
+#define MAX_PASSES 5
 #define MAX_CONTROLLABLE_VARS 5
 #define DEFAULT_WIDTH 1280
 #define DEFAULT_HEIGHT 720
@@ -112,8 +112,8 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
     mControllableVars.resize(MAX_CONTROLLABLE_VARS);
 
     // create the builtin  passes
-    mBlitPass = FullScreenPass::create("Samples/HoarahLoux/__InternalBlit.ps.slang");
-    mClearPass = FullScreenPass::create("Samples/HoarahLoux/__InternalClear.ps.slang");
+    mBlitPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/Internal/Blit.ps.slang");
+    mClearPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/Internal/Clear.ps.slang");
 
 
     // camera
@@ -255,7 +255,7 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
     int lastPass = -1;
     for (int i = 0; i < mPasses.size(); ++i)
     {
-        if (mPasses[i].mActive)
+        if (mPasses[i].mActive && mPasses[i].mShaderPath.length() > 0)
         {
             setCommonVars(mPasses[i].mPass, width, height);
             // run final pass
