@@ -68,12 +68,21 @@ float sdOctogonPrism(in vec3 p, in float r, float h)
     return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
 }
 
+// arbitrary orientation, from point a to point b
 float sdCapsule(vec3 p, vec3 a, vec3 b, float r)
 {
     vec3 pa = p - a, ba = b - a;
     float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
     return length(pa - ba * h) - r;
 }
+
+float sdVerticalCapsule(vec3 p, float h, float r)
+{
+    p.y -= clamp(p.y, 0.0, h);
+    return length(p) - r;
+}
+
+
 
 float sdRoundCone(in vec3 p, in float r1, float r2, float h)
 {
@@ -90,9 +99,9 @@ float sdRoundCone(in vec3 p, in float r1, float r2, float h)
 }
 
 // vertical
-float sdCylinder(vec3 p, vec2 h)
+float sdVerticalCappedCylinder(vec3 p, float h, float r)
 {
-    vec2 d = abs(vec2(length(p.xz), p.y)) - h;
+    vec2 d = abs(vec2(length(p.xz), p.y)) - vec2(r, h);
     return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
 }
 

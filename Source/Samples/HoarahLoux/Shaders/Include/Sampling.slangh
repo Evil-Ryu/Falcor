@@ -66,22 +66,22 @@ float3x3 GetGGXBasis(float Roughness, float Anisotropy, vec3 WorldNormal, vec3 W
 }
 
 // Based on each matrix row is a tangent axis
-float3 tangentToWorld(vec3 v, vec3 tangentZ)
+vec3 tangentToWorld(vec3 v, vec3 tangentZ)
 {
     return mul(v, GetTangentBasis(tangentZ));
 }
 
-float3 tangentToWorld(vec3 v, float3x3 tangentBasis)
+vec3 tangentToWorld(vec3 v, float3x3 tangentBasis)
 {
     return mul(v, tangentBasis);
 }
 
-float3 worldToTangent(vec3 v, vec3 tangentZ)
+vec3 worldToTangent(vec3 v, vec3 tangentZ)
 {
     return mul(GetTangentBasis(tangentZ), v);
 }
 
-float3 worldToTangent(vec3 v, float3x3 tangentBasis)
+vec3 worldToTangent(vec3 v, float3x3 tangentBasis)
 {
     return mul(tangentBasis, v);
 }
@@ -334,7 +334,7 @@ float VisibleGGXPDFAniso(vec3 V, vec3 H, vec2 Alpha)
 // http://jcgt.org/published/0007/04/01/
 // PDF = G_SmithV * VoH * D / NoV / (4 * VoH)
 // PDF = G_SmithV * D / (4 * NoV)
-float4 ImportanceSampleVisibleGGXAniso(vec2 DiskE, vec2 Alpha, vec3 V)
+vec4 ImportanceSampleVisibleGGXAniso(vec2 DiskE, vec2 Alpha, vec3 V)
 {
     // stretch
     vec3 Vh = normalize(vec3(Alpha * V.xy, V.z));

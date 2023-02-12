@@ -97,7 +97,7 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    std::string path0Str = "Samples/HoarahLoux/Shaders/PathtracerNew.slang";
+    std::string path0Str = "Samples/HoarahLoux/Shaders/Revision2023.slang";
     mPasses[0].mPass = FullScreenPass::create(path0Str);
     mPasses[0].mShaderPath = getFilenameFromPath(path0Str);
 
@@ -320,6 +320,10 @@ void ShaderEditor::onGuiRender(Gui* pGui)
         std::string camUpStr = "CamUp: " + std::to_string(camUp.x) + ", " +
             std::to_string(camUp.y) + ", " + std::to_string(camUp.z);
         w.text(camUpStr, false);
+
+        w.var("Camera Pos", camPos);
+        mCameras[0]->setPosition(camPos);
+
     }
 
     // passes

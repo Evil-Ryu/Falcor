@@ -211,7 +211,7 @@ RyuMaterial getMaterial(float id, vec3 pos)
         mat.transparency = 1.;
         mat.eta = 1.;
         mat.absorptionCoeff = vec3(0.);
-        mat.scatteringCoeff = vec3(100.);
+        mat.scatteringCoeff = vec3(200.);
         mat.extinctionCoeff = mat.absorptionCoeff + mat.scatteringCoeff;
         mat.scatteringAlbedo = mat.scatteringCoeff / mat.extinctionCoeff;
         mat.g = 0.0;
@@ -332,7 +332,9 @@ float apollonian(vec3 p)
 
 vec2 mapVolume(vec3 p)
 { 
-    float d = length(p + vec3(0., -0.2, 0.)) - 1.;// +0.3 * fbm3d(p * 5.);
+    //float d = length(p + vec3(0., -0.2, 0.)) - 1;// +0.3 * fbm3d(p * 5.);
+    float d = mapMandelBox(p + vec3(1., -1.5, 0.)) ;
+    // 
     //float d = sdTorus(p, vec2(1., .3));
     //float d = sdBox(p, vec3(1.));
     // thin shell and hollow inside
@@ -1015,7 +1017,7 @@ vec3 integrateMultiScatterHomogeneousVolume(vec3 ro, vec3 rd, vec3 n, RyuMateria
     hit = intersectVolumeBoundary(ro, rd, FAR);
     float totalDistance = hit.x;
 
-    float rnd = hash11(seed++);
+    float rnd = hqRandom();
     float scatterDistance = -log(1.0 - rnd) / avgChannels(mat.extinctionCoeff);
 
     // if scatter point is inside the volume
@@ -1365,11 +1367,16 @@ vec3 scene(vec3 ro, vec3 rd)
                 }
                 else
                 {
-                    //vec3 LVolume = integrateMultiScatterHomogeneousVolume(nextRo, nextRd, n, volumeMat, currentVolumeMatId, transmittance, weight, hit, hitVolumeParticle);
-                    
+                    vec3 LVolume = vec3(0.);
 
-                    vec3 LVolume = integrateMultiScatterHeterVolume(nextRo, nextRd, n, maxExtinction, currentVolumeMatId, volumeMat, transmittance, weight, hit, hitVolumeParticle);
-
+                    if (volumeMat.heteregeneous)
+                    {
+                        integrateMultiScatterHeterVolume(nextRo, nextRd, n, maxExtinction, currentVolumeMatId, volumeMat, transmittance, weight, hit, hitVolumeParticle);
+                    }
+                    else
+                    {
+                        integrateMultiScatterHomogeneousVolume(nextRo, nextRd, n, volumeMat, currentVolumeMatId, transmittance, weight, hit, hitVolumeParticle);
+                    }
 
                     // for multi scattering
                     throughput *= transmittance * weight * btdfAndPdf.xyz / btdfAndPdf.w;
