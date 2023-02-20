@@ -38,7 +38,13 @@ static float seed;
 #define PI 3.1415926535
 #define DE_ITER 10
 
+#define MAT_FRACTAL 0.
+#define MAT_TREE_TRUNK 1.
+#define MAT_TREE_LEAVES 2.
+
 static float pixelSize;
+
+static float mateId;
 
 struct Material
 {
@@ -56,7 +62,7 @@ Material getMaterial(float id, vec3 p)
     mate.F0 = .04;
     mate.shininess = 16.;
 
-    if (id == 1.)
+    if (id == MAT_FRACTAL)
     {
         mate.albedo = mix(fractalMate(p).zxy, vec3(1.1, 0.5, .0), .5);
         if (p.y < 4.5)
@@ -64,7 +70,22 @@ Material getMaterial(float id, vec3 p)
         //mate.albedo = mix(globalCol.xyz, fractalMate(p).zxy, .5);
         //mate.albedo = fractalMate(p).xyz;
     }
+    else if (id == MAT_TREE_TRUNK)
+    {
+        mate.albedo = vec3(0.561, 0.459, 0.357);
+    }
+    else if (id == MAT_TREE_LEAVES)
+    {
+        mate.albedo = vec3(0.353, 0.518, 0.102);
+    }
     return mate;
+}
+
+float hash11(float p)
+{
+    vec2 p2 = fract(vec2(p * 5.3983, p * 5.4427));
+    p2 += dot(p2.yx, p2.xy + vec2(21.5351, 14.3137));
+    return fract(p2.x * p2.y * 95.4337) * 0.5 + 0.5;
 }
 
 float hash12(vec2 p)
@@ -186,21 +207,143 @@ vec3 fractalMate(vec3 p)
     //return vec3(.8, .5, .4) + vec3(.2, .4, .2) * cos(6.28*(vec3(2., 1., 1.)*acc*.1 + vec3(0, .25, .25)));
 }
 
+mat2 rot(float r)
+{
+    return mat2(cos(r), sin(r), -sin(r), cos(r));
+}
 
-float map(vec3 p)
+float smin(float a, float b, float k)
+{
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+
+}
+vec2 fold(vec2 p, float s, out float id)
+{
+    float a = PI / s + atan2(p.x, p.y);
+    float n = PI * 2. / s;
+    a = floor(a / n);
+    id = mod(a, s);
+    //p = rot(a * n), p;
+    p = mul(p, rot(a * n));
+    return p;
+}
+
+float dbar(vec3 p, vec3 a, vec3 b, float r)
+{
+    vec3 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h) - r;
+}
+
+
+vec2 tree(vec3 z0)
+{
+    vec4 z = vec4(z0, 1.0);
+
+    vec3 p = z.xyz;
+    p.x -= sin(p.y * 2.) * 0.2;
+
+    float d = max(abs(p.y - 0.1) - 1., length(p.xz) - 0.2 + smoothstep(0., 2., p.y) * 0.23);
+
+    float id = 0.;
+    float mateid;
+
+    vec4 z1 = z;
+
+    for (float i = 0.; i < 8.; i += 1.)
+    {
+        float f = (i + 2.) * 2.;
+        if (i >= 4.) f = 2.;
+        z.xz = fold(z.xz, f, id);
+        float a = -.8 - i / 4.;
+        if (i >= 5.) a = -.5;
+        z.yz = mul(z.yz, rot(a));
+
+        p = z.xyz;
+        p.x += sin(p.y * 4.) * 0.1 * hash11(id * 17. + i + 1.);
+        //float len = id/(float(i)+3.);
+        float len = 1.;
+        vec3 dir = normalize(vec3(0., 2., 0.) - vec3(0., 0., 1.));
+        float k = 0.1 - smoothstep(.6, 2.5, p.y) * 0.07;
+        float l = 3.;
+        if (i >= 4.)
+        {
+            p.x *= .3; p.z += abs(sin(p.x * 25.)) * 0.05;
+            p.x += abs(sin(p.y * 15.)) * 0.03;
+            k = 0.1 - sin(p.y * 2. + 2.5) * .1;
+            l = 3.;
+        }
+        else if (i > 0.) k *= 0.5;
+
+        float dcap = dbar(p + vec3(0., 0., len),// + 2.*hash11( id) * dir, 
+            vec3(0., 0., len),// - float(i*2+1)*hash11(float(i) * 17. + id) * dir, 
+            vec3(0., 0., len) + len * l * dir,
+            k) / z.w;
+
+
+        if (i >= 4.)
+        {
+            if (dcap < d)
+            {
+                d = dcap;
+                mateid = MAT_TREE_LEAVES;
+            }
+        }
+        else
+        {
+            d = smin(d, dcap / 2., 0.05 - 0.04 * step(2., i));
+            mateid = MAT_TREE_TRUNK;
+        }
+
+        float l2 = id / (i + 8.);
+
+        if (i == 1.)
+            z1 = z;
+
+        if (i < 2.)
+        {
+            z.z += len;// -  hash11(l2 * 17.) * 1.;//l2;
+            z.y -= len * 2.;// - hash11(l2 * 17.) * 1.;
+            z *= 2.;//vec4(2.0,2.0,2.0,2.);
+        }
+        else
+        {
+            z.z += len - l2 * 2.;//hash11(l2 * 17.) * 5.;
+            z.y -= len * 1.8 - hash11(float(i) * 17.) * 1.;;// - l2 * 2. -  2. * hash11(float(i));
+
+            if (i == 6.) { z = z1, z.z += len; z.y -= len; z *= 2.5; };
+
+            z *= 1.7;
+        }
+    }
+
+    return vec2(d * .5, id);
+}
+
+
+vec2 map(vec3 p)
 {
     //return length(p) - 1.;
-    float d0 = fractal(p.xzy);
-    return d0;
+    float mateid = MAT_FRACTAL;
+    vec3 q = p + vec3(-35, 4.5, 16);
+    float d0 = fractal(q.xzy);
+
+    vec2 r1 = tree((p - vec3(0.87, 3., 1.82)) * .5) * 2.;
+
+    if(r1.x < d0)
+        return r1;
+
+    return vec2(d0, mateid);
 }
 
 vec3 getNormal(vec3 p, float t)
 {
     vec2 e = vec2(0.001 * t, 0.);
     
-    return normalize(vec3(map(p + e.xyy) - map(p - e.xyy),
-                          map(p + e.yxy) - map(p - e.yxy),
-                          map(p + e.yyx) - map(p - e.yyx)));
+    return normalize(vec3(map(p + e.xyy).x - map(p - e.xyy).x,
+                          map(p + e.yxy).x - map(p - e.yxy).x,
+                          map(p + e.yyx).x - map(p - e.yyx).x));
 }
 
 float shadow(vec3 ro, vec3 rd)
@@ -208,7 +351,7 @@ float shadow(vec3 ro, vec3 rd)
     float s = 1.,t = .01, h;
     for(int i = 0; i < 32; i++)
     {
-        h = map(ro + rd * t);
+        h = map(ro + rd * t).x;
         s = min(s, 16. * h / t);
         if(s < 1e-4) break;
         t += clamp(h, .01, .05);
@@ -222,7 +365,7 @@ float ao(vec3 p, vec3 n)
     for(float i = 1.0; i < 5.0 + 1.1; i++)
     {
         d = i / 5.;
-        r += w * (d - map(p + n * d));
+        r += w * (d - map(p + n * d).x);
         w *= 0.5;
     }
     return 1.0 - clamp(r, 0., 1.);
@@ -264,7 +407,7 @@ vec3 shading(vec3 p, vec3 n, vec3 ro, vec3 rd)
         
     radi *= shadow(p, w0) *occ;
 
-    radi = mate.albedo.xyz;
+    //radi = mate.albedo.xyz;
     //return vec3(pow(occ,4.));
     //return mate;
       //return shadow(p, w0) * vec3(1.); 	
@@ -274,19 +417,21 @@ vec3 shading(vec3 p, vec3 n, vec3 ro, vec3 rd)
 vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
 {
     float rnd = 0.9 + 0.1 * hash12(uv.xy);
-    float t = 0.01, d = 1e10;
+    float t = 0.01;
+    vec2 res = vec2(1e9);
     
-    for(int i = 0; i < 256; ++i)
+    for(int i = 0; i < 1024; ++i)
     {
-        d = abs(map(ro + t * rd)) * rnd;
+        res = map(ro + t * rd);
+        res.x = abs(res.x) * rnd;
         
-        if(d < 0.0005 + 0.0002 * t || t > FAR)
+        if(res.x < 0.0005 + 0.0002 * t || t > FAR)
         	break;
         
-        t += d;
+        t += res.x;
     }
 
-    return vec2(t, 1.);
+    return vec2(t, res.y);
 }
 
 #if !PATHTRACER
