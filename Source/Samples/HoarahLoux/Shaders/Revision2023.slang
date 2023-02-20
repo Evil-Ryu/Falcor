@@ -24,7 +24,7 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 static vec2 debugFragCoord;
 static float seed;
 
-#define PATHTRACER 1
+#define PATHTRACER 0
 #define FAR 100.
 #define MAX_BOUNCES 3
 #define INTER_THRESHOLD .001
@@ -43,8 +43,6 @@ static float seed;
 #define MAT_TREE_LEAVES 2.
 
 static float pixelSize;
-
-static float mateId;
 
 struct Material
 {
@@ -318,7 +316,7 @@ vec2 tree(vec3 z0)
         }
     }
 
-    return vec2(d * .5, id);
+    return vec2(d * .5, mateid);
 }
 
 
@@ -329,8 +327,8 @@ vec2 map(vec3 p)
     vec3 q = p + vec3(-35, 4.5, 16);
     float d0 = fractal(q.xzy);
 
-    vec2 r1 = tree((p - vec3(0.87, 3., 1.82)) * .5) * 2.;
-
+    vec2 r1 = tree((p - vec3(0.87, 3., 1.82)) * .5);
+    r1.x *= 2.;
     if(r1.x < d0)
         return r1;
 
@@ -387,7 +385,7 @@ float ggx(float roughness, vec3 rd, vec3 W, vec3 n)
 }
 
 
-vec3 shading(vec3 p, vec3 n, vec3 ro, vec3 rd)
+vec3 shading(vec3 p, vec3 n, vec3 ro, vec3 rd, float mateid)
 {
     vec3 w0 = normalize(vec3(1., 1., -1.));
     vec3 L0 = vec3(1.);
@@ -398,7 +396,7 @@ vec3 shading(vec3 p, vec3 n, vec3 ro, vec3 rd)
     float amb2 = 0.5 - 0.5 * n.y;
     float spe = ggx(.64, rd, w0, n) * max(0., dot(n, w0));
 
-    Material mate = getMaterial(1., p);
+    Material mate = getMaterial(mateid, p);
     //return mate;
     float occ = ao(p, n);
     
@@ -450,7 +448,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
     {
         vec3 p = ro + t * rd;
         vec3 n = getNormal(p, t);
-        col = shading(p, n, ro, rd);
+        col = shading(p, n, ro, rd, res.y);
     }
     
     //col=mix(col, vec3(0.4,0.7,1.), 1.-exp(-.0001*t*t));
