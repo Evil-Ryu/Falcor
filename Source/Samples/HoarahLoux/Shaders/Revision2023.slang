@@ -24,7 +24,7 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 static vec2 debugFragCoord;
 static float seed;
 
-#define PATHTRACER 0
+#define PATHTRACER 1
 #define FAR 100.
 #define MAX_BOUNCES 3
 #define INTER_THRESHOLD .001
@@ -239,7 +239,7 @@ float dbar(vec3 p, vec3 a, vec3 b, float r)
 }
 
 
-vec2 tree(vec3 z0)
+vec2 tree(vec3 z0, int trunk)
 {
     vec4 z = vec4(z0, 1.0);
 
@@ -253,13 +253,16 @@ vec2 tree(vec3 z0)
 
     vec4 z1 = z;
 
-    for (float i = 0.; i < 8.; i += 1.)
+    float num = trunk > 0 ? 3. : 6.;
+
+    for (float i = 0.; i < num; i += 1.)
     {
         float f = (i + 2.) * 2.;
         if (i >= 4.) f = 2.;
+
         z.xz = fold(z.xz, f, id);
         float a = -.8 - i / 4.;
-        if (i >= 5.) a = -.5;
+        if (i > 4.) a = -.8;
         z.yz = mul(z.yz, rot(a));
 
         p = z.xyz;
@@ -278,6 +281,9 @@ vec2 tree(vec3 z0)
         }
         else if (i > 0.) k *= 0.5;
 
+        /*if(i == 3 || i == 2)
+            l = 1.5;*/
+
         float dcap = dbar(p + vec3(0., 0., len),// + 2.*hash11( id) * dir, 
             vec3(0., 0., len),// - float(i*2+1)*hash11(float(i) * 17. + id) * dir, 
             vec3(0., 0., len) + len * l * dir,
@@ -294,13 +300,13 @@ vec2 tree(vec3 z0)
         }
         else
         {
-            d = smin(d, dcap / 2., 0.05 - 0.04 * step(2., i));
+            d = trunk>0 ? smin(d, dcap / 2., 0.05 - 0.04 * step(2., i)) : 1e3;
             mateid = MAT_TREE_TRUNK;
         }
 
         float l2 = id / (i + 8.);
 
-        if (i == 1.)
+        if (i == 2.)
             z1 = z;
 
         if (i < 2.)
@@ -311,12 +317,23 @@ vec2 tree(vec3 z0)
         }
         else
         {
-            z.z += len - l2 * 2.;//hash11(l2 * 17.) * 5.;
-            z.y -= len * 1.8 - hash11(float(i) * 17.) * 1.;;// - l2 * 2. -  2. * hash11(float(i));
+            if (i <= 3.)
+            {
+                z.z += len;// -l2 * 2.;//hash11(l2 * 17.) * 5.;
+                z.y -= len * 1.8 - hash11(float(i) * 17.) * 1.;;// - l2 * 2. -  2. * hash11(float(i));
 
-            if (i == 6.) { z = z1, z.z += len; z.y -= len; z *= 2.5; };
+                if (i == 6.) { z = z1, z.z += len; z.y -= len; z *= 2.5; };
 
-            z *= 1.7;
+                z *= 2.5;
+            } 
+            else
+            {
+                z = z1;
+
+                z.z += len;// -l2 * 2.;//hash11(l2 * 17.) * 5.;
+                z.y -= len * 1.2  - hash11(float(i) * 17.) * 1.;;// - l2 * 2. -  2. * hash11(float(i));
+                z *= 4.;
+            }
         }
     }
 
@@ -328,6 +345,8 @@ vec2 map(vec3 p)
 {
     //return length(p) - 1.;
     float mateid = MAT_FRACTAL;
+
+#if 0
     vec3 q = p + vec3(-35, 4.5, 16);
     float d0 = fractal(q.xzy);
 
@@ -335,8 +354,27 @@ vec2 map(vec3 p)
     r1.x *= 2.;
     if(r1.x < d0)
         return r1;
-
     return vec2(d0, mateid);
+
+#else
+    vec3 q = (p - vec3(0.87, 3., 1.82));
+    vec3 q1 = q;
+    vec2 r0 = tree(q * 0.5, 1); r0.x *= 2.;
+    vec2 r1 = tree(q * .5, 0); r1.x *= 2.;
+
+    q1.xz = mul(q1.xz, rot(.6));
+    vec2 r2 = tree(q1 * .5, 0); r2.x *= 2.;
+    //q1.xz = mul(q1.xz, rot(.5));
+
+    //vec2 r3 = tree(q1 * .5); r3.x *= 2.;
+    vec2 r = r0;
+    //return r0;
+    if (r1.x < r.x) r = r1;
+    if (r2.x < r.x) r = r2;
+    //if (r3.x < r.x) r = r3;
+
+    return r;
+#endif
 }
 
 vec3 getNormal(vec3 p, float t)
@@ -408,7 +446,7 @@ vec3 shading(vec3 p, vec3 n, vec3 ro, vec3 rd, float mateid)
     vec3 radi = (2. * dif + .5 * bac + 0.5 * amb + 0.1*amb2) * mate.albedo * L0 + spe * L0 * .25;
     //vec3 radi = (6. * dif + 5.5 * bac + 1.5 * amb + 1.*amb2) * mate * L0 + spe * L0 * .25;
         
-    radi *= shadow(p, w0) *occ;
+    //radi *= shadow(p, w0) *occ;
 
     //radi = mate.albedo.xyz;
     //return vec3(pow(occ,4.));
@@ -511,6 +549,7 @@ vec4 sampleLight(vec3 pos, vec3 V, vec3 n, Material mate)
     //float occ = ao(pos, n);
 
     col = sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha / lightSelectPdf;
+
     return vec4(col, lightSelectPdf);
 }
 

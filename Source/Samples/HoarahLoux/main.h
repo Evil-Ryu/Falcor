@@ -57,7 +57,7 @@ private:
 
     CameraController::SharedPtr mpCamCtrl;
     std::vector<Camera::SharedPtr> mCameras;
-    float mCameraSpeed = 1.f;
+    float mCameraSpeed = 3.f;
 
 
     // for debug
