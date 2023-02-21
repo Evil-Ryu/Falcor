@@ -62,15 +62,19 @@ Material getMaterial(float id, vec3 p)
 
     if (id == MAT_FRACTAL)
     {
-        mate.albedo = mix(fractalMate(p).zxy, vec3(1.1, 0.5, .0), .5);
-        if (p.y < 4.5)
-            mate.albedo = mix(mate.albedo, vec3(1., .5, .3) * .2, .4) ;
+        vec3 col = fractalMate(p).zxy;
+        col = mix(vec3(0.2, .25, .0) * col,  col,  smoothstep(0., 5., p.y));
+        col = mix(vec3(0.2, .15, .0) * col, col, smoothstep(0., .5, p.y));
+        mate.albedo = col;
+        //if (p.y < 1.5)
+            //mate.albedo = mix(mate.albedo, vec3(1., .5, .3) * .2, .4) ;
+            //
         //mate.albedo = mix(globalCol.xyz, fractalMate(p).zxy, .5);
         //mate.albedo = fractalMate(p).xyz;
     }
     else if (id == MAT_TREE_TRUNK)
     {
-        mate.albedo = vec3(0.561, 0.459, 0.357);
+        mate.albedo = vec3(0.561, 0.459, 0.357) * .2;
     }
     else if (id == MAT_TREE_LEAVES)
     {
@@ -202,7 +206,7 @@ vec3 fractalMate(vec3 p)
     return .7 + .3 * sin(1. + 10.2 * acc + vec3(0.0, 0.5, 1.));
     //return .5 + .5 * sin(1. + 1.2 * acc3 + vec3(1., 0.5, 0.));
     //return pow(vec3(.003) * abs(acc3.xyz * acc), vec3(1.));
-    //return vec3(.8, .5, .4) + vec3(.2, .4, .2) * cos(6.28*(vec3(2., 1., 1.)*acc*.1 + vec3(0, .25, .25)));
+    //return vec3(.8, .5, .4) + vec3(.2, .4, .2) * cos(6.28*(vec3(2., 1., 1.)*acc*10.1 + vec3(0, .25, .25)));
 }
 
 mat2 rot(float r)
@@ -369,7 +373,8 @@ float ao(vec3 p, vec3 n)
     return 1.0 - clamp(r, 0., 1.);
 }
 
-static vec3 sunDir = normalize(vec3(-1., 1., 1.));
+static vec3 sunDir = normalize(vec3(1., 1., -1.));
+//static vec3 sunCol = vec3(253., 184., 19.) / 256.;
 static vec3 sunCol = vec3(1.);
 
 float ggx(float roughness, vec3 rd, vec3 W, vec3 n)
@@ -387,7 +392,7 @@ float ggx(float roughness, vec3 rd, vec3 W, vec3 n)
 
 vec3 shading(vec3 p, vec3 n, vec3 ro, vec3 rd, float mateid)
 {
-    vec3 w0 = normalize(vec3(1., 1., -1.));
+    vec3 w0 = sunDir;
     vec3 L0 = vec3(1.);
     
     float dif = max(0., dot(n, w0));
@@ -619,7 +624,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
             // indirect part
             // it has to finally hit a light or the sky to have color
             // or there will be only direct part
-            Lo = Lo + throughput * vec3(0., .5, 1.) * .5;
+            Lo = Lo + throughput * vec3(0., .5, 1.) * .2;
             break;
         }
 
