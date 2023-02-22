@@ -238,7 +238,7 @@ float dbar(vec3 p, vec3 a, vec3 b, float r)
     return length(pa - ba * h) - r;
 }
 
-
+static float aa = 0.;
 vec2 tree(vec3 z0, int trunk)
 {
     vec4 z = vec4(z0, 1.0);
@@ -262,7 +262,9 @@ vec2 tree(vec3 z0, int trunk)
 
         z.xz = fold(z.xz, f, id);
         float a = -.8 - i / 4.;
-        if (i > 4.) a = -.8;
+        if (i > 4.) {
+            a = -.8; z.xz = mul(z.xz, rot(0.8));
+        }
         z.yz = mul(z.yz, rot(a));
 
         p = z.xyz;
@@ -280,6 +282,7 @@ vec2 tree(vec3 z0, int trunk)
             l = 3.;
         }
         else if (i > 0.) k *= 0.5;
+
 
         /*if(i == 3 || i == 2)
             l = 1.5;*/
@@ -319,20 +322,20 @@ vec2 tree(vec3 z0, int trunk)
         {
             if (i <= 3.)
             {
-                z.z += len;// -l2 * 2.;//hash11(l2 * 17.) * 5.;
+                z.z += len - hash11(float(i) * 17.) * (2.-aa);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
                 z.y -= len * 1.8 - hash11(float(i) * 17.) * 1.;;// - l2 * 2. -  2. * hash11(float(i));
 
                 if (i == 6.) { z = z1, z.z += len; z.y -= len; z *= 2.5; };
 
-                z *= 2.5;
+                z *= 2.;
             } 
             else
             {
                 z = z1;
 
-                z.z += len;// -l2 * 2.;//hash11(l2 * 17.) * 5.;
-                z.y -= len * 1.2  - hash11(float(i) * 17.) * 1.;;// - l2 * 2. -  2. * hash11(float(i));
-                z *= 4.;
+                z.z += len;// +hash11(i * 117.) * .3;// -hash11(float(i) * 17.) * (2. - aa * 2.);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
+                z.y -= len * 1.2  - hash11(float(i) * 17.) * 1.;// - l2 * 2. -  2. * hash11(float(i));
+                z *= 4. + a/3.;
             }
         }
     }
@@ -360,13 +363,18 @@ vec2 map(vec3 p)
     vec3 q = (p - vec3(0.87, 3., 1.82));
     vec3 q1 = q;
     vec2 r0 = tree(q * 0.5, 1); r0.x *= 2.;
+
+    aa = 0.;
     vec2 r1 = tree(q * .5, 0); r1.x *= 2.;
 
     q1.xz = mul(q1.xz, rot(.6));
+    q1.y -= 0.4;
+    aa = 1.;
     vec2 r2 = tree(q1 * .5, 0); r2.x *= 2.;
-    //q1.xz = mul(q1.xz, rot(.5));
 
-    //vec2 r3 = tree(q1 * .5); r3.x *= 2.;
+    q1.xz = mul(q1.xz, rot(.5));
+
+    //vec2 r3 = tree(q1 * .5, 0); r3.x *= 2.;
     vec2 r = r0;
     //return r0;
     if (r1.x < r.x) r = r1;
