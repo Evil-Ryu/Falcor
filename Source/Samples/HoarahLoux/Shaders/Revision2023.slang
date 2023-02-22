@@ -49,6 +49,7 @@ struct Material
     vec3 albedo;
     float F0;
     float shininess;
+    float id;
 };
 
 static vec3 globalCol = vec3(1.);
@@ -59,7 +60,7 @@ Material getMaterial(float id, vec3 p)
     mate.albedo = vec3(1.);
     mate.F0 = .04;
     mate.shininess = 16.;
-
+    mate.id = id;
     if (id == MAT_FRACTAL)
     {
         vec3 col = fractalMate(p).zxy;
@@ -253,7 +254,7 @@ vec2 tree(vec3 z0, int trunk)
 
     vec4 z1 = z;
 
-    float num = trunk > 0 ? 3. : 6.;
+    float num = trunk > 0 ? 4. : 6.;
 
     for (float i = 0.; i < num; i += 1.)
     {
@@ -276,16 +277,15 @@ vec2 tree(vec3 z0, int trunk)
         float l = 3.;
         if (i >= 4.)
         {
-            p.x *= .3; p.z += abs(sin(p.x * 25.)) * 0.05;
-            p.x += abs(sin(p.y * 15.)) * 0.03;
+            p.x *= .3; p.z -= abs(sin(p.x * 10.)) * 0.2;
+            p.x -= abs(sin(p.y * 20.)) * 0.02;// *(1. - smoothstep(0.1, .15, abs(p.x)));
+            p.y -= abs(sin(p.z * 20.)) * 0.12;// *(1. - smoothstep(0.1, .15, abs(p.x)));
+
             k = 0.1 - sin(p.y * 2. + 2.5) * .1;
             l = 3.;
         }
         else if (i > 0.) k *= 0.5;
 
-
-        /*if(i == 3 || i == 2)
-            l = 1.5;*/
 
         float dcap = dbar(p + vec3(0., 0., len),// + 2.*hash11( id) * dir, 
             vec3(0., 0., len),// - float(i*2+1)*hash11(float(i) * 17. + id) * dir, 
@@ -322,20 +322,23 @@ vec2 tree(vec3 z0, int trunk)
         {
             if (i <= 3.)
             {
-                z.z += len - hash11(float(i) * 17.) * (2.-aa);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
-                z.y -= len * 1.8 - hash11(float(i) * 17.) * 1.;;// - l2 * 2. -  2. * hash11(float(i));
-
-                if (i == 6.) { z = z1, z.z += len; z.y -= len; z *= 2.5; };
+                z.z += len - hash11(i * 17.) * (1.8-aa*.3);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
+                z.y -= len * (2.4-aa*.6) - hash11(i * 17.);;// - l2 * 2. -  2. * hash11(float(i));
 
                 z *= 2.;
+                if (i == 3. && aa == 0.)
+                {
+                    z *= .8;
+                    //z.z += 1.;
+                }
             } 
             else
             {
                 z = z1;
 
-                z.z += len;// +hash11(i * 117.) * .3;// -hash11(float(i) * 17.) * (2. - aa * 2.);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
-                z.y -= len * 1.2  - hash11(float(i) * 17.) * 1.;// - l2 * 2. -  2. * hash11(float(i));
-                z *= 4. + a/3.;
+                z.z += len;// +hash11(i * 17.) * 1.;// -hash11(float(i) * 17.) * (2. - aa * 2.);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
+                z.y -= len * 1.8  - hash11(float(i) * 17.) * 1.;// - l2 * 2. -  2. * hash11(float(i));
+                z *= 4. + a/2.;
             }
         }
     }
@@ -374,12 +377,17 @@ vec2 map(vec3 p)
 
     q1.xz = mul(q1.xz, rot(.5));
 
+    q = p + vec3(-35, 4.5, 16);
+    vec2 r4 = vec2(fractal(q.xzy), MAT_FRACTAL);
+
     //vec2 r3 = tree(q1 * .5, 0); r3.x *= 2.;
     vec2 r = r0;
     //return r0;
     if (r1.x < r.x) r = r1;
     if (r2.x < r.x) r = r2;
     //if (r3.x < r.x) r = r3;
+    if (r4.x < r.x) r = r4;
+
 
     return r;
 #endif
@@ -419,7 +427,7 @@ float ao(vec3 p, vec3 n)
     return 1.0 - clamp(r, 0., 1.);
 }
 
-static vec3 sunDir = normalize(vec3(1., 1., -1.));
+static vec3 sunDir = normalize(vec3(-1., 1., 1.));
 //static vec3 sunCol = vec3(253., 184., 19.) / 256.;
 static vec3 sunCol = vec3(1.);
 
@@ -556,8 +564,10 @@ vec4 sampleLight(vec3 pos, vec3 V, vec3 n, Material mate)
 
     //float occ = ao(pos, n);
 
-    col = sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha / lightSelectPdf;
-
+    if(mate.id == MAT_TREE_LEAVES)
+    col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha + sunCol*max(0.,dot(-n, sunDir)* vec3(0.353, 0.518, 0.102) * 0.1)) / lightSelectPdf;
+    else
+    col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha) / lightSelectPdf;
     return vec4(col, lightSelectPdf);
 }
 
