@@ -25,7 +25,7 @@ static vec2 debugFragCoord;
 static float seed;
 
 #define PATHTRACER 1
-#define FAR 100.
+#define FAR 90.
 #define MAX_BOUNCES 3
 #define INTER_THRESHOLD .001
 #define EPSILON 			0.0001
@@ -54,6 +54,54 @@ struct Material
 
 static vec3 globalCol = vec3(1.);
 
+float hash11(float p)
+{
+    vec2 p2 = fract(vec2(p * 5.3983, p * 5.4427));
+    p2 += dot(p2.yx, p2.xy + vec2(21.5351, 14.3137));
+    return fract(p2.x * p2.y * 95.4337) * 0.5 + 0.5;
+}
+
+float noise(vec2 x)
+{
+    vec2 p = floor(x);
+    vec2 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    float n = p.x + p.y * 57.0;
+    return mix(mix(hash11(n + 0.0), hash11(n + 1.0), f.x),
+        mix(hash11(n + 57.0), hash11(n + 58.0), f.x), f.y);
+}
+
+float fbm(vec2 p)
+{
+    float f = 0.0;
+    f += .5 * noise(p);
+    p = p * 2.01;
+    f += .25 * noise(p);
+    p = p * 2.02;
+    f += .125 * noise(p);
+    p = p * 2.03;
+    return f;
+}
+
+
+float bump(vec3 p, vec3 n)
+{
+    p *= iResolution.x / 20.;
+    p.y *= .5;
+    p.xz *= 2.;
+    return (fbm(p.xy) * abs(n.z) + noise(p.xz) * abs(n.y) + noise(p.yz) * abs(n.x)) / 3.;
+}
+
+vec3 bump_mapping(vec3 p, vec3 n, float weight)
+{
+    vec2 e = vec2(2. / iResolution.y, 0);
+    vec3 g = vec3(bump(p - e.xyy, n) - bump(p + e.xyy, n),
+        bump(p - e.yxy, n) - bump(p + e.yxy, n),
+        bump(p - e.yyx, n) - bump(p + e.yyx, n)) / (e.x * 2.);
+    g = (g - n * dot(g, n));
+    return normalize(n + g * weight);
+}
+
 Material getMaterial(float id, vec3 p)
 {
     Material mate;
@@ -63,12 +111,13 @@ Material getMaterial(float id, vec3 p)
     mate.id = id;
     if (id == MAT_FRACTAL)
     {
-        vec3 col = fractalMate(p).zxy;
-        col = mix(vec3(0.2, .25, .0) * col,  col,  smoothstep(0., 5., p.y));
-        col = mix(vec3(0.2, .15, .0) * col, col, smoothstep(0., .5, p.y));
+        vec3 col = fractalMate(p);
+        col = mix(vec3(1.1, .05, .0), col, smoothstep(-1., .5, p.y));
+        col = mix(vec3(0.2, .25, .0), col,  abs(smoothstep(5., 10., p.y)-.5));
+
         mate.albedo = col;
-        //if (p.y < 1.5)
-            //mate.albedo = mix(mate.albedo, vec3(1., .5, .3) * .2, .4) ;
+        //if (p.y < -.5)
+           // mate.albedo = vec3(.2, .25, .0);// mix(mate.albedo, vec3(1., .5, .3) * .2, .4);
             //
         //mate.albedo = mix(globalCol.xyz, fractalMate(p).zxy, .5);
         //mate.albedo = fractalMate(p).xyz;
@@ -82,13 +131,6 @@ Material getMaterial(float id, vec3 p)
         mate.albedo = vec3(0.353, 0.518, 0.102);
     }
     return mate;
-}
-
-float hash11(float p)
-{
-    vec2 p2 = fract(vec2(p * 5.3983, p * 5.4427));
-    p2 += dot(p2.yx, p2.xy + vec2(21.5351, 14.3137));
-    return fract(p2.x * p2.y * 95.4337) * 0.5 + 0.5;
 }
 
 float hash12(vec2 p)
@@ -186,28 +228,23 @@ float fractal(vec3 p)
 vec3 fractalMate(vec3 p)
 {
     float acc = 100.;
-    
     vec3 acc3 = vec3(0);
-    for(int i = 0; i < DE_ITER + 4; i++)
+    for(int i = 0; i < DE_ITER; i++)
     {
         float r2Old = dot(p, p);
         vec3 p0 = 2. * clamp(p, -c, c) - p;
         
-        acc3 += dot(p,p0) * max(1./r2Old, 0.03);
+        acc3 += distance(p,p0) * max(1./r2Old, .3);
         p = p0;
         float r2 = dot(p, p);
-        acc = min(acc, r2 + r2Old);
+        acc = min(acc, r2Old + r2);
 
         float k = max(1. / r2, 0.03);
 		p *= k;
         //acc += length(p0.xz - p.xz);
     }
 
-    //return vec3(acc) * 0.001;
-    return .7 + .3 * sin(1. + 10.2 * acc + vec3(0.0, 0.5, 1.));
-    //return .5 + .5 * sin(1. + 1.2 * acc3 + vec3(1., 0.5, 0.));
-    //return pow(vec3(.003) * abs(acc3.xyz * acc), vec3(1.));
-    //return vec3(.8, .5, .4) + vec3(.2, .4, .2) * cos(6.28*(vec3(2., 1., 1.)*acc*10.1 + vec3(0, .25, .25)));
+    return vec3(.4, .5, .25) + vec3(.3, .2, .1) * cos(6.28*(vec3(.4)*acc3));
 }
 
 mat2 rot(float r)
@@ -379,12 +416,13 @@ vec2 map(vec3 p)
 
     q = p + vec3(-35, 4.5, 16);
     vec2 r4 = vec2(fractal(q.xzy), MAT_FRACTAL);
+    //return r4;
 
-    //vec2 r3 = tree(q1 * .5, 0); r3.x *= 2.;
     vec2 r = r0;
     //return r0;
     if (r1.x < r.x) r = r1;
     if (r2.x < r.x) r = r2;
+    //vec2 r3 = tree(q1 * .5, 0); r3.x *= 2.;
     //if (r3.x < r.x) r = r3;
     if (r4.x < r.x) r = r4;
 
@@ -427,9 +465,9 @@ float ao(vec3 p, vec3 n)
     return 1.0 - clamp(r, 0., 1.);
 }
 
-static vec3 sunDir = normalize(vec3(-1., 1., 1.));
+static vec3 sunDir = normalize(vec3(-1.,1.,1.));
 //static vec3 sunCol = vec3(253., 184., 19.) / 256.;
-static vec3 sunCol = vec3(1.);
+static vec3 sunCol = vec3(.7,.7,.9);
 
 float ggx(float roughness, vec3 rd, vec3 W, vec3 n)
 {
@@ -681,7 +719,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
             // indirect part
             // it has to finally hit a light or the sky to have color
             // or there will be only direct part
-            Lo = Lo + throughput * vec3(0., .5, 1.) * .2;
+            Lo = Lo + throughput * vec3(0., .5, 1.) * .01;
             break;
         }
 
@@ -690,6 +728,10 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
         vec3 n = getNormal(pos, hit.x);
 
         Material mate = getMaterial(hit.y, pos);
+
+        if(mate.id == MAT_TREE_TRUNK || (pos.y<=.5))
+        n = bump_mapping(pos, n, 100. / max(iResolution.x, iResolution.y));
+
 
         vec3 nextRd = rd, nextRo = pos;
 
