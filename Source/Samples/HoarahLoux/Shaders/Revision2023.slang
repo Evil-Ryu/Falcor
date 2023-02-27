@@ -277,32 +277,31 @@ float dbar(vec3 p, vec3 a, vec3 b, float r)
 }
 
 static float aa = 0.;
-vec2 tree(vec3 z0, int trunk)
+vec2 tree(vec3 z0, float scale, float trunk)
 {
     vec4 z = vec4(z0, 1.0);
 
     vec3 p = z.xyz;
-    p.x -= sin(p.y * 2.) * 0.2;
-
-    float d = max(abs(p.y - 0.1) - 1., length(p.xz) - 0.2 + smoothstep(0., 2., p.y) * 0.23);
-
-    float id = 0.;
+   
+    float id = 0., d = 1e3;
     float mateid;
 
     vec4 z1 = z;
 
-    float num = trunk > 0 ? 4. : 6.;
+    float num = 6.;
 
     for (float i = 0.; i < num; i += 1.)
     {
-        float f = (i + 2.) * 2.;
+        float f = (i + 2) * scale;
         if (i >= 4.) f = 2.;
+        if (scale == 1.) f = 4.;
 
         z.xz = fold(z.xz, f, id);
         float a = -.8 - i / 4.;
         if (i > 4.) {
             a = -.8; z.xz = mul(z.xz, rot(0.8));
         }
+
         z.yz = mul(z.yz, rot(a));
 
         p = z.xyz;
@@ -332,16 +331,21 @@ vec2 tree(vec3 z0, int trunk)
 
         if (i >= 4.)
         {
+            dcap += 0.009;
             if (dcap < d)
             {
                 d = dcap;
                 mateid = MAT_TREE_LEAVES;
             }
         }
-        else
+        else if(i < trunk)
         {
-            d = trunk>0 ? smin(d, dcap / 2., 0.05 - 0.04 * step(2., i)) : 1e3;
-            mateid = MAT_TREE_TRUNK;
+            if (dcap < d)
+            {
+                mateid = MAT_TREE_TRUNK;
+            }
+            d = smin(d, dcap / 2., 0.05 - 0.04 * step(2., i));
+
         }
 
         float l2 = id / (i + 8.);
@@ -401,18 +405,42 @@ vec2 map(vec3 p)
 
 #else
     vec3 q = (p - vec3(0.87, 3., 1.82));
+
+    
+
+
     vec3 q1 = q;
-    vec2 r0 = tree(q * 0.5, 1); r0.x *= 2.;
+    q1.x -= sin(q1.y * 1.) * 0.1;
+    q1 *= .5;
 
+    vec2 r5 = vec2(max(abs(q1.y - 2.1) - 3., length(q1.xz) - 0.2 + smoothstep(1., 4., q1.y) * 0.2)/.5, MAT_TREE_TRUNK);
     aa = 0.;
-    vec2 r1 = tree(q * .5, 0); r1.x *= 2.;
+    q1 = q;
+    q1.xy = mul(q1.xy, rot(-.1));
 
-    q1.xz = mul(q1.xz, rot(.6));
+    vec2 r0 = tree(q1 * 0.5, 1., 4.); r0.x *= 2.;
+
+    //aa = 0.;
+    //vec2 r1 = tree(q * .5, 0); r1.x *= 2.;
+
+    /*q1.xz = mul(q1.xz, rot(.6));
     q1.y -= 0.4;
     aa = 1.;
-    vec2 r2 = tree(q1 * .5, 0); r2.x *= 2.;
+    vec2 r2 = tree(q1 * .5, 0); r2.x *= 2.;*/
 
-    q1.xz = mul(q1.xz, rot(.5));
+
+    q1 = q;
+    q1.y -= 3.;
+    q1.xy = mul(q1.xy, rot(.5));
+    aa = 1.;
+    vec2 r3 = tree(q1 * .6, 1., 4.); r3.x /=.6;
+
+    q1 = q;
+    q1.y -= 5.;
+    q1.xy = mul(q1.xy, rot(-.5));
+    aa = 1.;
+    vec2 r2 = tree(q1 * .6, 1., 4.); r2.x /= .6;
+
 
     q = p + vec3(-35, 4.5, 16);
     vec2 r4 = vec2(fractal(q.xzy), MAT_FRACTAL);
@@ -420,11 +448,12 @@ vec2 map(vec3 p)
 
     vec2 r = r0;
     //return r0;
-    if (r1.x < r.x) r = r1;
+    //if (r1.x < r.x) r = r1;
     if (r2.x < r.x) r = r2;
     //vec2 r3 = tree(q1 * .5, 0); r3.x *= 2.;
-    //if (r3.x < r.x) r = r3;
-    if (r4.x < r.x) r = r4;
+    if (r3.x < r.x) r = r3;
+    //if (r4.x < r.x) r = r4;
+    if (r5.x < r.x) r = r5;
 
 
     return r;
