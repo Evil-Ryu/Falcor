@@ -290,19 +290,25 @@ vec2 tree(vec3 z0, float scale, float trunk)
 
     float num = 6.;
 
+    float prevId = 0.;
+
     for (float i = 0.; i < num; i += 1.)
     {
-        float f = (i + 2) * scale;
+        float f = (i + 2.) * scale;
         if (i >= 4.) f = 2.;
         if (scale == 1.) f = 4.;
 
         z.xz = fold(z.xz, f, id);
-        float a = -.8 - i / 4.;
+        float a = -.8 - i / 4.;// +prevId / 10.;
         if (i > 4.) {
             a = -.8; z.xz = mul(z.xz, rot(0.8));
         }
 
+        prevId = id;
+
         z.yz = mul(z.yz, rot(a));
+        z.xy = mul(z.xy, rot(-0.2/(i+1.+prevId)));
+
 
         p = z.xyz;
         p.x += sin(p.y * 4.) * 0.1 * hash11(id * 17. + i + 1.);
@@ -321,6 +327,7 @@ vec2 tree(vec3 z0, float scale, float trunk)
             l = 3.;
         }
         else if (i > 0.) k *= 0.5;
+        else k *= .7;
 
 
         float dcap = dbar(p + vec3(0., 0., len),// + 2.*hash11( id) * dir, 
@@ -344,7 +351,7 @@ vec2 tree(vec3 z0, float scale, float trunk)
             {
                 mateid = MAT_TREE_TRUNK;
             }
-            d = smin(d, dcap / 2., 0.05 - 0.04 * step(2., i));
+            d = smin(d, dcap / 2., 0.06 - 0.04 * step(2., i));
 
         }
 
