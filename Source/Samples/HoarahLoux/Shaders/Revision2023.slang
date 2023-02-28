@@ -299,15 +299,20 @@ vec2 tree(vec3 z0, float scale, float trunk)
         if (scale == 1.) f = 4.;
 
         z.xz = fold(z.xz, f, id);
-        float a = -.8 - i / 4.;// +prevId / 10.;
+
+        // Controls the spreadness of the branches / leaves
+        float a = -.8 - i / 10. +prevId / 10.;// 0. + prevId / 20.;
+        if(scale==2.) a = -.8 - i / 4.;
+
         if (i > 4.) {
             a = -.8; z.xz = mul(z.xz, rot(0.8));
         }
 
-        prevId = id;
+       if(i == 0.)prevId = id;
 
         z.yz = mul(z.yz, rot(a));
-        z.xy = mul(z.xy, rot(-0.2/(i+1.+prevId)));
+        z.xy = mul(z.xy, rot(-0.2/(i+1.+id)));
+
 
 
         p = z.xyz;
@@ -315,7 +320,9 @@ vec2 tree(vec3 z0, float scale, float trunk)
         //float len = id/(float(i)+3.);
         float len = 1.;
         vec3 dir = normalize(vec3(0., 2., 0.) - vec3(0., 0., 1.));
-        float k = 0.1 - smoothstep(.6, 2.5, p.y) * 0.07;
+
+        // the thickness of the branches
+        float k = 0.05 - smoothstep(.6, 3., p.y) * 0.05;
         float l = 3.;
         if (i >= 4.)
         {
@@ -323,11 +330,9 @@ vec2 tree(vec3 z0, float scale, float trunk)
             p.x -= abs(sin(p.y * 20.)) * 0.02;// *(1. - smoothstep(0.1, .15, abs(p.x)));
             p.y -= abs(sin(p.z * 20.)) * 0.12;// *(1. - smoothstep(0.1, .15, abs(p.x)));
 
-            k = 0.1 - sin(p.y * 2. + 2.5) * .1;
+            k = 0.01 - sin(p.y * 2. + 2.5) * .1;
             l = 3.;
         }
-        else if (i > 0.) k *= 0.5;
-        else k *= .7;
 
 
         float dcap = dbar(p + vec3(0., 0., len),// + 2.*hash11( id) * dir, 
@@ -338,7 +343,7 @@ vec2 tree(vec3 z0, float scale, float trunk)
 
         if (i >= 4.)
         {
-            dcap += 0.009;
+            //dcap += 0.009;
             if (dcap < d)
             {
                 d = dcap;
@@ -370,8 +375,9 @@ vec2 tree(vec3 z0, float scale, float trunk)
         {
             if (i <= 3.)
             {
-                z.z += len - hash11(i * 17.) * (1.8-aa*.3);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
-                z.y -= len * (2.4-aa*.6) - hash11(i * 17.);;// - l2 * 2. -  2. * hash11(float(i));
+                // the offset pushes leaves further inside
+                z.z += len;// -hash11(i * 17.) * (1.8 - aa);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
+                z.y -= len *(2.4 - aa * .6) - hash11(i * 17.) * id;;// - l2 * 2. -  2. * hash11(float(i));
 
                 z *= 2.;
                 if (i == 3. && aa == 0.)
@@ -385,8 +391,11 @@ vec2 tree(vec3 z0, float scale, float trunk)
                 z = z1;
 
                 z.z += len;// +hash11(i * 17.) * 1.;// -hash11(float(i) * 17.) * (2. - aa * 2.);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
+
+                // larger push leaves outside
                 z.y -= len * 1.8  - hash11(float(i) * 17.) * 1.;// - l2 * 2. -  2. * hash11(float(i));
-                z *= 4. + a/2.;
+                //z1 *= 4. + a/2.;
+                z *= 4. + a / 2.;
             }
         }
     }
@@ -425,7 +434,7 @@ vec2 map(vec3 p)
     q1 = q;
     q1.xy = mul(q1.xy, rot(-.1));
 
-    vec2 r0 = tree(q1 * 0.5, 1., 4.); r0.x *= 2.;
+    vec2 r0 = tree(q1 * 0.5, 2., 4.); r0.x *= 2.;
 
     //aa = 0.;
     //vec2 r1 = tree(q * .5, 0); r1.x *= 2.;
@@ -460,7 +469,8 @@ vec2 map(vec3 p)
     //vec2 r3 = tree(q1 * .5, 0); r3.x *= 2.;
     if (r3.x < r.x) r = r3;
     //if (r4.x < r.x) r = r4;
-    if (r5.x < r.x) r = r5;
+    if (r5.x < r.x) r.y = r5.y;
+    r.x = smin(r.x, r5.x, .1);
 
 
     return r;
