@@ -276,137 +276,128 @@ float dbar(vec3 p, vec3 a, vec3 b, float r)
     return length(pa - ba * h) - r;
 }
 
-static float aa = 0.;
-vec2 tree(vec3 z0, float scale, float trunk)
+vec4 dBranches(vec3 p, float i, float id, float len)
+{
+    p.x += sin(p.y * 4.) * 0.1 * hash11(id * 17. + i + 1.);
+    vec3 dir = normalize(vec3(0., 2., -1));
+    float k = .1 - smoothstep(.6, 2.5, p.y) * .07;
+    float l = 3.;
+    if (i >= 4.)
+    {
+        p.x *= .3; p.z += abs(sin(p.x * 25.)) * .05;
+        p.x += abs(sin(p.y * 15.)) * .03;
+        k = .1 - sin(p.y * 2. + 2.5) * .1;
+        l = 3.;
+    }
+    else if (i > 0.) k *= 0.2;
+
+    float dcap = dbar(p + vec3(0., 0., len),
+        vec3(0., 0., len),
+        vec3(0., 0., len) + len * l * dir,
+        k);
+
+    return vec4(p, dcap);
+}
+
+vec2 tree(vec3 z0)
 {
     vec4 z = vec4(z0, 1.0);
 
     vec3 p = z.xyz;
-   
-    float id = 0., d = 1e3;
-    float mateid;
+    p.x -= sin(p.y * 2.) * 0.2;
 
-    vec4 z1 = z;
+    float d = max(abs(p.y - 0.1) - 1., length(p.xz) - 0.23 + smoothstep(0., 2., p.y) * 0.3);
 
-    float num = 6.;
+    float id = 0.;
 
-    float prevId = 0.;
+    float numLayers = 6.;
 
-    for (float i = 0.; i < num; i += 1.)
+    float mateid = MAT_TREE_TRUNK;
+
+    vec4 branchClonePos = z;
+    float branchCloneIndex = 3.;
+    float branchLayer = 3.;
+
+    vec4 leafClonePos = z;
+    float leafCloneIndex = 4.;
+
+    for (float layerIndex = 1., i = 0.; layerIndex <= numLayers; layerIndex += 1.)
     {
-        float f = (i + 2.) * scale;
-        if (i >= 4.) f = 2.;
-        if (scale == 1.) f = 4.;
-
-        z.xz = fold(z.xz, f, id);
-
-        // Controls the spreadness of the branches / leaves
-        // the larger a is, the more sparse the branches are
-        float a = -.8 - i / 5. + prevId / 10.;// 0. + prevId / 20.;
-        if(scale==2.) a = -.8 - i / 4.;
-
-        if (i > 4.) {
-            a = -.8; z.xz = mul(z.xz, rot(0.8));
-        }
-
-        if(i == 0.)prevId = id;
-
-        z.yz = mul(z.yz, rot(a));
-        z.xy = mul(z.xy, rot(-0.1/(i+1.+id)));
-
-
-
-        p = z.xyz;
-        p.z += sin(p.y * 4.) * 0.1 * hash11(id * 17. + i + 1.);
-        //float len = id/(float(i)+3.);
-        float len = 1.;
-        vec3 dir = normalize(vec3(0., 2., 0.) - vec3(0., 0., 1.));
-
-        // the thickness of the branches
-        float k = 0.05 - smoothstep(.6, 3., p.y) * 0.05;
-        float l = 3.;
-
-        if (i >= 4.)
+        for (; i < 5.; i += 1.)
         {
-            p.x *= .3; p.z -= abs(sin(p.x * 10.)) * 0.2;
-            p.x -= abs(sin(p.y * 20.)) * 0.02;// *(1. - smoothstep(0.1, .15, abs(p.x)));
-            p.y -= abs(sin(p.z * 20.)) * 0.12;// *(1. - smoothstep(0.1, .15, abs(p.x)));
+            float f = 5. + (layerIndex > 1. ? 4. : 0.);
+            //float f = 2.;
+            float spread = -.95 - i / 5.;//+ .5*(layerIndex == 1. ? id / 15. : id / 27.);
 
-            k = 0.01 - sin(p.y * 2. + 2.5) * .1;
-        }
-        else if (i > 0.) k *= 0.3;
-        
-
-
-        float dcap = dbar(p + vec3(0., 0., len),// + 2.*hash11( id) * dir, 
-            vec3(0., 0., len),// - float(i*2+1)*hash11(float(i) * 17. + id) * dir, 
-            vec3(0., 0., len) + len * l * dir,
-            k) / z.w;
-
-
-        if (i >= 4.)
-        {
-            //dcap += 0.009;
-            if (dcap < d)
+            if (i == branchCloneIndex)
             {
-                d = dcap;
-                mateid = MAT_TREE_LEAVES;
+                branchClonePos = z;
             }
-        }
-        else if(i < trunk)
-        {
-            if (dcap < d)
+
+            if (layerIndex == 1. && i == leafCloneIndex)
+                //if(i == leafCloneIndex)
+                    //{leafClonePos = z; z.xyz = abs(z.xyz)-.5;}            
             {
-                mateid = MAT_TREE_TRUNK;
+                leafClonePos = z;
             }
-            d = smin(d, dcap / 2., 0.06 - 0.04 * step(2., i));
 
+
+            z.xz = fold(z.xz, f, id);
+            z.yz = mul(z.yz, rot(spread));
+
+
+            float len = 1. + id / f / 3.;
+            vec4 res = dBranches(z.xyz, i, id, len);
+            float dcap = res.w / z.w;
+
+            if (i >= 4.)
+            {
+                float d1 = dcap + 0.011;
+                if (d1 < d)
+                {
+                    d = d1;
+                    mateid = MAT_TREE_LEAVES;
+                }
+            }
+            else
+            {
+                float d1 = dcap;
+                if (d1 < d)
+                {
+                    d = smin(d, d1, 0.05 - 0.04 * step(2., float(i)));
+                    mateid = MAT_TREE_TRUNK;
+                }
+            }
+
+            z.zy += vec2(1., -2.) * len;
+            z *= 2.;
         }
 
-        float l2 = id / (i + 8.);
 
-        if (i == 3.)
-            z1 = z;
-
-        if (i < 2.)
+        if (layerIndex < branchLayer)
         {
-            z.z += len;// -  hash11(l2 * 17.) * 1.;//l2;
-            z.y -= len * 2.;// - hash11(l2 * 17.) * 1.;
-            z *= 2.;//vec4(2.0,2.0,2.0,2.);
+            z = branchClonePos;
+            // place more branches uniformly on the parent branch
+            z.zy -= normalize(vec2(1., -2.)) * (2. * hash11(layerIndex * 17.)) * branchCloneIndex * 2. / branchLayer;;
+            //z *= 4. - branchCloneIndex + 1.;
+            i = branchCloneIndex;
+
         }
         else
         {
-            if (i <= 3.)
-            {
-                // the offset pushes leaves further inside
-                z.z += len;// -hash11(i * 17.) * (1.8 - aa);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
-                z.y -= len *(2.4 - aa * .6) - hash11(i * 17.) * id;;// - l2 * 2. -  2. * hash11(float(i));
+            z = leafClonePos;
+            z.zy -= normalize(vec2(1., -2.)) * (layerIndex - 2.) * leafCloneIndex / (numLayers - branchLayer);//  / (numLeafLayers);
+            i = leafCloneIndex;
 
-                z *= 2.;
-                if (i == 3. && aa == 0.)
-                {
-                    z *= .8;
-                    //z.z += 1.;
-                }
-            } 
-            else
-            {
-                z = z1;
-
-                z.z += len;// +hash11(i * 17.) * 1.;// -hash11(float(i) * 17.) * (2. - aa * 2.);// -l2 * 2.;//hash11(l2 * 17.) * 5.;
-
-                // larger push leaves outside
-                z.y -= len * 2.  - hash11(float(i) * 17.) * 1.;// - l2 * 2. -  2. * hash11(float(i));
-                //z1 *= 4. + a/2.;
-                //z *= 4. + a / 2.;
-                //z *= 2. - a / 2.;
-                z *= 4.;
-            }
+            // folding to add more leaves in each layer
+            z.xzy = abs(z.xzy) - 1.;
         }
+        z.xy = mul(rot(.2 * (numLayers - layerIndex)), z.xy);
     }
 
     return vec2(d * .5, mateid);
 }
+
 
 
 vec2 map(vec3 p)
@@ -431,36 +422,8 @@ vec2 map(vec3 p)
 
 
     vec3 q1 = q;
-    q1.x -= sin(q1.y * 1.) * 0.1;
-    q1 *= .5;
+    vec2 r0 = tree(q1 * 0.5); r0.x *= 2.;
 
-    vec2 r5 = vec2(max(abs(q1.y - 2.1) - 3., length(q1.xz) - 0.2 + smoothstep(1., 4., q1.y) * 0.2)/.5, MAT_TREE_TRUNK);
-    aa = 0.;
-    q1 = q;
-    q1.xy = mul(q1.xy, rot(-.1));
-
-    vec2 r0 = tree(q1 * 0.5, 2., 4.); r0.x *= 2.;
-
-    //aa = 0.;
-    //vec2 r1 = tree(q * .5, 0); r1.x *= 2.;
-
-    /*q1.xz = mul(q1.xz, rot(.6));
-    q1.y -= 0.4;
-    aa = 1.;
-    vec2 r2 = tree(q1 * .5, 0); r2.x *= 2.;*/
-
-
-    q1 = q;
-    q1.y -= 3.;
-    q1.xy = mul(q1.xy, rot(.5));
-    aa = 1.;
-    vec2 r3 = tree(q1 * .6, 1., 4.); r3.x /=.6;
-
-    q1 = q;
-    q1.y -= 4.8;
-    q1.xy = mul(q1.xy, rot(-.5));
-    aa = 1.;
-    vec2 r2 = tree(q1 * .65, 1., 4.); r2.x /= .65;
 
 
     q = p + vec3(-35, 4.5, 16);
@@ -470,13 +433,7 @@ vec2 map(vec3 p)
     vec2 r = r0;
     //return r0;
     //if (r1.x < r.x) r = r1;
-    if (r2.x < r.x) r = r2;
-    //vec2 r3 = tree(q1 * .5, 0); r3.x *= 2.;
-    if (r3.x < r.x) r = r3;
     //if (r4.x < r.x) r = r4;
-    if (r5.x < r.x) r.y = r5.y;
-    r.x = smin(r.x, r5.x, .1);
-
 
     return r;
 #endif
