@@ -45,6 +45,7 @@ static float MARCHING_STEP_SCALE = iCameraDirty > 0. ? 5. : 1.;
 #define MAT_TREE_TRUNK 1.
 #define MAT_TREE_LEAVES 2.
 #define MAT_FLOWER 3.
+#define MAT_WALL 4.
 
 static float pixelSize;
 
@@ -138,6 +139,10 @@ Material getMaterial(float id, vec3 p)
     {
         mate.albedo = vec3(0.9, 0.1, 0.008);
     }
+    else if (id == MAT_WALL)
+    {
+        mate.albedo = vec3(.35, .3, .25);
+    }
     return mate;
 }
 
@@ -195,9 +200,10 @@ float mb(vec3 z, bool yeah)
     if(!yeah)z.x = mod(z.y + 1.0, 2.0) - 1.0;
     else
     {
+        if (z.y > -3.16 || z.x < -1.) return 100.;
         fixed_radius2 = 2.;
         min_radius2 = 0.1;
-        folding_limit = 1.5;
+        folding_limit = 1.8;
         scale = 3.;
 
         z.z = mod(z.z, 2.0) - 1.0;
@@ -529,8 +535,7 @@ vec2 map(vec3 p)
     vec2 r6 = vec2(box(p+vec3(80.,0.,0.), vec3(71.,1e3,1e3)), MAT_FRACTAL);
     r4.x = max(r4.x, -r6.x);
 
-    float d5 = mb((p * 0.1 - vec3(-3., 3.5, 1.8)), true) / 0.1;
-    r4.x = min(r4.x, max(r6.x,d5));
+    vec2 r5 = vec2(max(r6.x, mb((p * 0.1 - vec3(-3., 3.6, 1.8)), true) / 0.1), MAT_WALL);
 
     //return r4;
 
@@ -539,7 +544,7 @@ vec2 map(vec3 p)
     if (r1.x < r.x) r = r1;
     if (r2.x < r.x) r = r2;
     if (r4.x < r.x) r = r4;
-//    if (r6.x < r.x) r = r6;
+    if (r5.x < r.x) r = r5;
 
     return r;
 
@@ -887,7 +892,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
         ro = nextRo;
     }
 
-    //Lo = mix(Lo, vec3(0.4, 0.7, 1.), 1. - exp(-.00001 * t * t));
+    Lo = mix(Lo, vec3(0., .5, 1.) * .01, 1. - exp(-.0005 * t * t));
 
     return Lo;
 
