@@ -195,6 +195,11 @@ void ShaderEditor::setCommonVars(FullScreenPass::SharedPtr& pass, float w, float
         pass["ToyCB"]["iCameraDirty"] = mCameraDirty ? 1.f : 0.f;
     }
 
+    if (pass["ToyCB"].findMember("iAccumulationRestart").isValid())
+    {
+        pass["ToyCB"]["iAccumulationRestart"] = mAccumulationRestart ? 1.f : 0.f;
+    }
+
     if (pass["ToyCB"].findMember("iMaxSPP").isValid())
     {
         pass["ToyCB"]["iMaxSPP"] = mMaxSPP;
@@ -245,6 +250,10 @@ void ShaderEditor::executeClearPass(RenderContext* pRenderContext, Fbo::SharedPt
 void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::SharedPtr& pTargetFbo)
 {
     mCameraDirty = mpCamCtrl->update();
+
+    mAccumulationRestart = (mPrevCameraDirty && !mCameraDirty);
+    
+    mPrevCameraDirty = mCameraDirty;
 
     executeClearPass(pRenderContext, pTargetFbo);
     

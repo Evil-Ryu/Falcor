@@ -42,6 +42,8 @@ private:
     FullScreenPass::SharedPtr mClearPass;
     bool mNeedsClear = false;
     bool mCameraDirty = false;
+    bool mPrevCameraDirty = false;
+    bool mAccumulationRestart = false;
 
     Texture::SharedPtr mpTex;
     std::string mTexPath;

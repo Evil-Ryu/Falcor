@@ -9,6 +9,7 @@ cbuffer ToyCB
     float iGlobalTime;
     float iFrame;
     float iCameraDirty;
+    float iAccumulationRestart;
     float iMaxSPP;
 
     float3 RayOrigin;
@@ -24,13 +25,15 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 static vec2 debugFragCoord;
 static float seed;
 
+static int MAX_BOUNCES = iCameraDirty > 0. ? 3 : 1;
+static int MARCHING_STEPS = iCameraDirty > 0. ? 128 : 1024;
+
 #define PATHTRACER 1
 #define FAR 90.
-#define MAX_BOUNCES 3
+//#define MAX_BOUNCES 3
 #define INTER_THRESHOLD .001
 #define EPSILON 			0.0001
-#define MARCHING_STEPS 256
-#define MARCHING_STEP_SCALE 1.
+static float MARCHING_STEP_SCALE = iCameraDirty > 0. ? 5. : 1.;
 
 #define EVENT_REFLECTION 1.
 #define EVENT_TRANSMISSION 2.
@@ -41,6 +44,7 @@ static float seed;
 #define MAT_FRACTAL 0.
 #define MAT_TREE_TRUNK 1.
 #define MAT_TREE_LEAVES 2.
+#define MAT_FLOWER 3.
 
 static float pixelSize;
 
@@ -128,7 +132,11 @@ Material getMaterial(float id, vec3 p)
     }
     else if (id == MAT_TREE_LEAVES)
     {
-        mate.albedo = vec3(0.353, 0.518, 0.102);
+        mate.albedo = vec3(0.353, 0.518, 0.102)*1.5;
+    }
+    else if (id == MAT_FLOWER)
+    {
+        mate.albedo = vec3(0.9, 0.1, 0.008);
     }
     return mate;
 }
@@ -178,16 +186,27 @@ void box_fold(inout vec3 z, inout float dz) {
     z = clamp(z, -folding_limit, folding_limit) * 2.0 - z;
 }
 
-float mb(vec3 z)
+float mb(vec3 z, bool yeah)
 {
-    z.x = mod(z.y + 1.0, 2.0) - 1.0;
+    fixed_radius2 = 2.;
+    min_radius2 = 0.1;
+    folding_limit = 1.4;
+    scale = 3.;
+    if(!yeah)z.x = mod(z.y + 1.0, 2.0) - 1.0;
+    else
+    {
+        fixed_radius2 = 2.;
+        min_radius2 = 0.1;
+        folding_limit = 1.5;
+        scale = 3.;
 
+        z.z = mod(z.z, 2.0) - 1.0;
+    }
     orb = vec4(1000);
     vec3 offset = z;
     float dr = 1.0;
-    for (int n = 0; n <  9; ++n) {
-        z.xy = mul(mat2(.54, .84,
-            -.84, .54), z.xy);
+    for (int n = 0; n < 9; ++n) {
+        z.xy = mul(mat2(.54, .84, -.84, .54), z.xy);
 
         box_fold(z, dr);
         sphere_fold(z, dr);
@@ -202,15 +221,14 @@ float mb(vec3 z)
 }
 
 
-static const vec4 param_min = vec4(-1.4661, -1.1076, -1.1844, 1.8886);
-static const vec4 param_max = vec4(3.7324, 1.1972, 1.1204, 2.4136);
-
 static const vec3 c = vec3(.808, .22, 2.137);
 float fractal(vec3 p)
 {
+    int iter = DE_ITER;
+    bool yeah = false;
 	float scale = 1.0;
 	
-	for(int i=0; i < DE_ITER;i++)
+	for(int i=0; i < iter;i++)
 	{
 		p = 2.0*clamp(p, -c, c) - p;
 		float k = max(1. / dot(p, p), 0.03);
@@ -218,7 +236,8 @@ float fractal(vec3 p)
 		scale *= k;
 	}
 
-    float l = min(length(p.xz), mb(p*1.8)/1.8+.01);  // 2.3
+    float l = min(length(p.xz), mb(p*1.8, false)/1.8+.01);  // 2.3
+    
 	float rxy = l - .4;
 	float n = l * p.z;
 	rxy = max(rxy, -n / length(p) - .01);
@@ -285,7 +304,7 @@ vec4 dBranches(vec3 p, float i, float id, float len)
     if (i >= 4.)
     {
         p.x *= .3; p.z += abs(sin(p.x * 25.)) * .05;
-        p.x += abs(sin(p.y * 15.)) * .03;
+        p.x += abs(sin(p.y * 15.)) * .02;
         k = .1 - sin(p.y * 2. + 2.5) * .1;
         l = 3.;
     }
@@ -301,6 +320,8 @@ vec4 dBranches(vec3 p, float i, float id, float len)
 
 vec2 tree(vec3 z0)
 {
+    z0.xz = mul(rot(-.2), z0.xz);
+
     vec4 z = vec4(z0, 1.0);
 
     vec3 p = z.xyz;
@@ -398,45 +419,130 @@ vec2 tree(vec3 z0)
     return vec2(d * .5, mateid);
 }
 
+float dbar2(vec3 p, vec3 a, vec3 b, vec3 r)
+{
+    vec3 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return (length((pa - ba * h) / r) - 1.) * min(min(r.x, r.y), r.z);
+}
+
+vec4 dPedals(vec3 p, float i, float id, float len, float scale)
+{
+    p.z += sin(p.y * id / 2.) * 0.05;
+    vec3 dir = normalize(vec3(0., 2., -1));
+
+    p.z += sin(p.y * 2.) * (.65 - i / 5.);
+
+    float k = .1 - sin(p.y * 2. + 2.5) * .1;
+
+    if (i == 1.)
+    {
+        p.z += abs(sin(p.x * 5.)) * .08;
+        p.z += abs(sin((p.y - abs(p.x)) * 15.)) * .02;
+        p.x += sin(p.z * 60.) * .01;
+
+    }
+    float l = 2.8;
 
 
+    float dcap = dbar2(p + vec3(0., 0., len),
+        vec3(0., 0., len),
+        vec3(0., 0., len) + len * l * dir,
+        vec3(k * 3., k, .03)) + 0.01;
+    return vec4(p, dcap);
+}
+
+vec2 flower(vec3 z0, float fid)
+{
+    z0.xz = mul(rot(PI / 2. * fid), z0.xz);
+    z0.z *= -1.;
+    vec4 z = vec4(z0, 1.0);
+
+    vec3 p = z.xyz;
+    z.yz = mul(rot(-.5), z.yz);
+    p.z -= sin(p.y * 1.5) * 0.1;
+
+    float mateid = MAT_TREE_TRUNK;
+    float d = max(abs(p.y + 1.8) - 2., length(p.xz) - 0.1 + smoothstep(0., 2., p.y) * 0.1);
+
+    float id = 0.;
+    float f = 5.;
+    //float f = 2.;
+    float spread = 1.8;//+ .5*(layerIndex == 1. ? id / 15. : id / 27.);
+
+    z.xz = fold(z.xz, f, id);
+    z.yz = mul(rot(spread), z.yz);
+
+    for (float i = 1.; i <= 6.; i += 1.)
+    {
+        float len = 1.;
+        vec4 res = dPedals(z.xyz, i, id, len, z.w);
+        float dcap = res.w / z.w;
+
+        if (dcap < d)
+        {
+            if (i < 2.) mateid = MAT_TREE_LEAVES;
+            else mateid = MAT_FLOWER;
+            d = dcap;
+        }
+
+
+        z = vec4(z0, 1.);
+        z.yz = mul(rot(-.5), z.yz);
+        z.xz = mul(rot(0.3 * i), z.xz);
+        z.xz = fold(z.xz, 7. + i, id);
+        z.yz = mul(rot(1.2),z.yz);// - (i+1.)/100.);
+
+        if (i >= 2.)z.zy += vec2(.1 * i, 0) * len;
+        //z.z *= -1.;
+        z *= 1. + i * .5;// + 2.*i - 2.;
+    }
+
+    return vec2(d * .5, mateid);
+}
+
+float box(vec3 p, vec3 b)
+{
+    vec3 d = abs(p) - b;
+    return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));
+}
 vec2 map(vec3 p)
 {
     //return length(p) - 1.;
     float mateid = MAT_FRACTAL;
 
-#if 0
-    vec3 q = p + vec3(-35, 4.5, 16);
-    float d0 = fractal(q.xzy);
 
-    vec2 r1 = tree((p - vec3(0.87, 3., 1.82)) * .5);
-    r1.x *= 2.;
-    if(r1.x < d0)
-        return r1;
-    return vec2(d0, mateid);
-
-#else
     vec3 q = (p - vec3(0.87, 3., 1.82));
-
-    
 
 
     vec3 q1 = q;
     vec2 r0 = tree(q1 * 0.5); r0.x *= 2.;
 
-
+    q1 = q;
+    vec2 r1 = flower(1.5*(q1 + vec3(2.8, 2., -8.)), 0.); r1.x /= 1.5;
+    
+    q1 = q;
+    vec2 r2 = flower(1.5 * (q1 + vec3(3., 1.3, -4.5)), 1.); r2.x /= 1.5;
 
     q = p + vec3(-35, 4.5, 16);
     vec2 r4 = vec2(fractal(q.xzy), MAT_FRACTAL);
+    vec2 r6 = vec2(box(p+vec3(80.,0.,0.), vec3(71.,1e3,1e3)), MAT_FRACTAL);
+    r4.x = max(r4.x, -r6.x);
+
+    float d5 = mb((p * 0.1 - vec3(-3., 3.5, 1.8)), true) / 0.1;
+    r4.x = min(r4.x, max(r6.x,d5));
+
     //return r4;
 
     vec2 r = r0;
     //return r0;
-    //if (r1.x < r.x) r = r1;
-    //if (r4.x < r.x) r = r4;
+    if (r1.x < r.x) r = r1;
+    if (r2.x < r.x) r = r2;
+    if (r4.x < r.x) r = r4;
+//    if (r6.x < r.x) r = r6;
 
     return r;
-#endif
+
 }
 
 vec3 getNormal(vec3 p, float t)
@@ -475,7 +581,7 @@ float ao(vec3 p, vec3 n)
 
 static vec3 sunDir = normalize(vec3(-1.,1.,1.));
 //static vec3 sunCol = vec3(253., 184., 19.) / 256.;
-static vec3 sunCol = vec3(.7,.7,.9);
+static vec3 sunCol = vec3(1.);
 
 float ggx(float roughness, vec3 rd, vec3 W, vec3 n)
 {
@@ -523,11 +629,10 @@ vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
     float t = 0.01;
     vec2 res = vec2(1e9);
     
-    for(int i = 0; i < 1024; ++i)
+    for(int i = 0; i < MARCHING_STEPS; ++i)
     {
         res = map(ro + t * rd);
-        res.x = abs(res.x) * rnd;
-        
+        res.x = abs(res.x) * rnd * MARCHING_STEP_SCALE;
         if(res.x < 0.0005 + 0.0002 * t || t > FAR)
         	break;
         
@@ -611,7 +716,7 @@ vec4 sampleLight(vec3 pos, vec3 V, vec3 n, Material mate)
     //float occ = ao(pos, n);
 
     if(mate.id == MAT_TREE_LEAVES)
-    col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha + sunCol*max(0.,dot(-n, sunDir)* vec3(0.353, 0.518, 0.102) * 0.1)) / lightSelectPdf;
+    col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha + sunCol*max(0.,dot(-n, sunDir)* vec3(0.353, 0.518, 0.102) * 0.05)) / lightSelectPdf;
     else
     col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha) / lightSelectPdf;
     return vec4(col, lightSelectPdf);
@@ -738,7 +843,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
         Material mate = getMaterial(hit.y, pos);
 
         if(mate.id == MAT_TREE_TRUNK || (pos.y<=.5))
-        n = bump_mapping(pos, n, 100. / max(iResolution.x, iResolution.y));
+        n = bump_mapping(pos*.5, n, 200. / max(iResolution.x, iResolution.y));
 
 
         vec3 nextRd = rd, nextRo = pos;
@@ -795,6 +900,13 @@ vec4 mainImage(vec2 fragCoord)
     debugFragCoord = fragCoord;
     debugTexture[debugFragCoord] = float4(0., 0., 0., 0.);
 
+    // only update 1 out of 4 pixels when moving camera
+    if (iCameraDirty > 0.)
+    {
+        if (any( (uint2(fragCoord) ) % 2 != 0))
+            return vec4(0,0,0,1);
+    }
+
     seed = iGlobalTime + iResolution.y * fragCoord.x / iResolution.x + fragCoord.y / iResolution.y;
 
     vec2 offset = -0.5 + hash21(seed++);
@@ -815,13 +927,13 @@ vec4 mainImage(vec2 fragCoord)
     //vec3 up = normalize(cross(forward, right));
     vec3 up = normalize(cross(right, forward));
 
-    vec3 rd = normalize(p.x * right + p.y * up + 1.8 * forward);
+    vec3 rd = normalize(p.x * right + p.y * up + 2. * forward);
 
 
     vec3 finalCol = scene(ro, rd, p);
     float k = 1.;
 
-    if (iFrame > 0. && iCameraDirty == 0.)
+    if (iFrame > 0. && iCameraDirty == 0. && iAccumulationRestart == 0.)
     {
         vec4 prevCol = iPass0Output.Load(vec3(fragCoord, 0));
         k = prevCol.w;
