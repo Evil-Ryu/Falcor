@@ -43,8 +43,8 @@ void ShaderEditor::resetCamera()
 {
     auto camera = mCameras[0];
    
-    camera->setPosition(float3(0, 0, -3));
-    camera->setTarget(float3(0, 0, 0));
+    camera->setPosition(float3(-3.4, 6.16, 25.25));
+    camera->setTarget(float3(-3.4, 6.16, 24.26));
     camera->setUpVector(float3(0, 1, 0));
 
     {

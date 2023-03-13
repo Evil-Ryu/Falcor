@@ -17,23 +17,21 @@ cbuffer ToyCB
     float3 UpVector;
 };
 
-RWTexture2D<float4> debugTexture;
 
 layout(binding = 0) SamplerState iChannel0Sampler : register(s0);
 layout(binding = 1) texture2D iPass0Output : register(t0);
 
-static vec2 debugFragCoord;
 static float seed;
 
-static int MAX_BOUNCES = iCameraDirty > 0. ? 3 : 1;
-static int MARCHING_STEPS = iCameraDirty > 0. ? 128 : 1024;
+static int MAX_BOUNCES = 1;//  iCameraDirty > 0. ? 3 : 3;
+static int MARCHING_STEPS = 128;// iCameraDirty > 0. ? 128 : 1024;
+static float MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
 
 #define PATHTRACER 1
 #define FAR 90.
 //#define MAX_BOUNCES 3
 #define INTER_THRESHOLD .001
 #define EPSILON 			0.0001
-static float MARCHING_STEP_SCALE = iCameraDirty > 0. ? 5. : 1.;
 
 #define EVENT_REFLECTION 1.
 #define EVENT_TRANSMISSION 2.
@@ -107,6 +105,11 @@ vec3 bump_mapping(vec3 p, vec3 n, float weight)
     return normalize(n + g * weight);
 }
 
+float terrianHeight(float z)
+{
+    return sin(z * .2 + 1.) * 2.;
+}
+
 Material getMaterial(float id, vec3 p)
 {
     Material mate;
@@ -117,8 +120,8 @@ Material getMaterial(float id, vec3 p)
     if (id == MAT_FRACTAL)
     {
         vec3 col = fractalMate(p);
-        col = mix(vec3(1.1, .05, .0), col, smoothstep(-1., .5, p.y));
-        col = mix(vec3(0.2, .25, .0), col,  abs(smoothstep(5., 10., p.y)-.5));
+        col = mix(vec3(1.1, .05, .0), col, smoothstep(-1., .5, p.y-terrianHeight(p.z)));
+        col = mix(vec3(.12,.3,.1), col,  1.-smoothstep(.5, 5., p.y-terrianHeight(p.z)));
 
         mate.albedo = col;
         //if (p.y < -.5)
@@ -133,7 +136,7 @@ Material getMaterial(float id, vec3 p)
     }
     else if (id == MAT_TREE_LEAVES)
     {
-        mate.albedo = vec3(0.353, 0.518, 0.102)*1.5;
+        mate.albedo = vec3(0.353, 0.518, 0.102);
     }
     else if (id == MAT_FLOWER)
     {
@@ -141,7 +144,7 @@ Material getMaterial(float id, vec3 p)
     }
     else if (id == MAT_WALL)
     {
-        mate.albedo = vec3(.35, .3, .25);
+        mate.albedo = vec3(0.690, 0.565, 0.451);
     }
     return mate;
 }
@@ -158,11 +161,6 @@ vec2 hash21(float p)
     vec2 p2 = fract(p * vec2(5.3983, 5.4427));
     p2 += dot(p2.yx, p2.xy +  vec2(21.5351, 14.3137));
     return fract(vec2(p2.x * p2.y * 95.4337, p2.x * p2.y * 97.597));
-}
-
-float sphere(vec3 p)
-{
-    return length(p) - 1.;
 }
 
 
@@ -190,28 +188,31 @@ void sphere_fold(inout vec3 z, inout float dz) {
 void box_fold(inout vec3 z, inout float dz) {
     z = clamp(z, -folding_limit, folding_limit) * 2.0 - z;
 }
-
+static float haha = 1.;
 float mb(vec3 z, bool yeah)
 {
+    haha = 1.;
     fixed_radius2 = 2.;
     min_radius2 = 0.1;
     folding_limit = 1.4;
     scale = 3.;
+    float iter = 9.;
     if(!yeah)z.x = mod(z.y + 1.0, 2.0) - 1.0;
     else
     {
-        if (z.y > -3.16 || z.x < -1.) return 100.;
+        //if (z.y > -3.16 || z.x < -0.) return 100.;
         fixed_radius2 = 2.;
         min_radius2 = 0.1;
         folding_limit = 1.8;
         scale = 3.;
-
+        if (z.x < 0.) folding_limit = 2.;
+        else if (z.y > -3.16) return 100.;
         z.z = mod(z.z, 2.0) - 1.0;
     }
     orb = vec4(1000);
     vec3 offset = z;
     float dr = 1.0;
-    for (int n = 0; n < 9; ++n) {
+    for (int n = 0; n < iter; ++n) {
         z.xy = mul(mat2(.54, .84, -.84, .54), z.xy);
 
         box_fold(z, dr);
@@ -269,7 +270,9 @@ vec3 fractalMate(vec3 p)
         //acc += length(p0.xz - p.xz);
     }
 
-    return vec3(.4, .5, .25) + vec3(.3, .2, .1) * cos(6.28*(vec3(.4)*acc3));
+    //return vec3(.4, .5, .25) + vec3(.3, .2, .1) * cos(6.28*(vec3(.4)*acc3));
+    return vec3(.4, .4, .25) + vec3(.3, .2, .2) * cos(6.28 * (vec3(.4) * acc3));
+
 }
 
 mat2 rot(float r)
@@ -283,13 +286,18 @@ float smin(float a, float b, float k)
     return mix(b, a, h) - k * h * (1.0 - h);
 
 }
+
+float smax(float a, float b, float k)
+{
+    return smin(a, b, -k);
+}
+
 vec2 fold(vec2 p, float s, out float id)
 {
     float a = PI / s + atan2(p.x, p.y);
     float n = PI * 2. / s;
     a = floor(a / n);
     id = mod(a, s);
-    //p = rot(a * n), p;
     p = mul(p, rot(a * n));
     return p;
 }
@@ -331,19 +339,21 @@ vec2 tree(vec3 z0)
     vec4 z = vec4(z0, 1.0);
 
     vec3 p = z.xyz;
+    //p.xz = mul(rot(.5), p.xz);
+
     p.x -= sin(p.y * 2.) * 0.2;
 
     float d = max(abs(p.y - 0.1) - 1., length(p.xz) - 0.23 + smoothstep(0., 2., p.y) * 0.3);
 
     float id = 0.;
 
-    float numLayers = 6.;
+    float numLayers = 7.;
 
     float mateid = MAT_TREE_TRUNK;
 
     vec4 branchClonePos = z;
     float branchCloneIndex = 3.;
-    float branchLayer = 3.;
+    float branchLayer = 4.;
 
     vec4 leafClonePos = z;
     float leafCloneIndex = 4.;
@@ -354,7 +364,7 @@ vec2 tree(vec3 z0)
         {
             float f = 5. + (layerIndex > 1. ? 4. : 0.);
             //float f = 2.;
-            float spread = -.95 - i / 5.;//+ .5*(layerIndex == 1. ? id / 15. : id / 27.);
+            float spread = -.95 - i / 7.;//+ .5*(layerIndex == 1. ? id / 15. : id / 27.);
 
             if (i == branchCloneIndex)
             {
@@ -521,21 +531,24 @@ vec2 map(vec3 p)
     vec3 q = (p - vec3(0.87, 3., 1.82));
 
 
-    vec3 q1 = q;
-    vec2 r0 = tree(q1 * 0.5); r0.x *= 2.;
+    vec3 q1 = q + vec3(0,-.8,0);
+    vec2 r0 = tree(q1 * .35); r0.x /=.35;
 
     q1 = q;
     vec2 r1 = flower(1.5*(q1 + vec3(2.8, 2., -8.)), 0.); r1.x /= 1.5;
     
     q1 = q;
-    vec2 r2 = flower(1.5 * (q1 + vec3(3., 1.3, -4.5)), 1.); r2.x /= 1.5;
+    vec2 r2 = flower(1.5 * (q1 + vec3(3., -0.8, -4.5)), 1.); r2.x /= 1.5;
 
     q = p + vec3(-35, 4.5, 16);
+    q.y += terrianHeight(q.z);
     vec2 r4 = vec2(fractal(q.xzy), MAT_FRACTAL);
-    vec2 r6 = vec2(box(p+vec3(80.,0.,0.), vec3(71.,1e3,1e3)), MAT_FRACTAL);
+
+    vec2 r6 = vec2(box(p + vec3(80,0,0), vec3(70.8, 1e5, 1e5)), MAT_FRACTAL);
     r4.x = max(r4.x, -r6.x);
 
-    vec2 r5 = vec2(max(r6.x, mb((p * 0.1 - vec3(-3., 3.6, 1.8)), true) / 0.1), MAT_WALL);
+    p.y -= sin(p.z * .2 + 2.);
+    vec2 r5 = vec2(max(r6.x, mb((p * 0.1 - vec3(-3., 3.5, 0.)), true) / 0.1), MAT_WALL);
 
     //return r4;
 
@@ -552,7 +565,7 @@ vec2 map(vec3 p)
 
 vec3 getNormal(vec3 p, float t)
 {
-    vec2 e = vec2(0.001 * t, 0.);
+    vec2 e = vec2(0.001, 0.);
     
     return normalize(vec3(map(p + e.xyy).x - map(p - e.xyy).x,
                           map(p + e.yxy).x - map(p - e.yxy).x,
@@ -572,106 +585,41 @@ float shadow(vec3 ro, vec3 rd)
     return clamp(s, 0., 1.);
 }
 
-float ao(vec3 p, vec3 n)
-{
-    float r = 0.0, w = 1.0, d;
-    for(float i = 1.0; i < 5.0 + 1.1; i++)
-    {
-        d = i / 5.;
-        r += w * (d - map(p + n * d).x);
-        w *= 0.5;
-    }
-    return 1.0 - clamp(r, 0., 1.);
-}
 
-static vec3 sunDir = normalize(vec3(-1.,1.,1.));
+static vec3 sunDir = normalize(vec3(-.5, 1., -.5));
+//static vec3 sunDir = normalize(vec3(-1., 1., 1.));
 //static vec3 sunCol = vec3(253., 184., 19.) / 256.;
 static vec3 sunCol = vec3(1.);
 
-float ggx(float roughness, vec3 rd, vec3 W, vec3 n)
-{
-    vec3 H = normalize(W - rd);
-    float NoH = max(0., dot(n, H));
-    vec3 NxH = cross(n, H);
-    float a = roughness * roughness;
-    float b = NoH * a;
-    float c = a / ((1. - NoH * NoH) + b * b);
-    float d = c * c;
-    return d;
-}
-
-
-vec3 shading(vec3 p, vec3 n, vec3 ro, vec3 rd, float mateid)
-{
-    vec3 w0 = sunDir;
-    vec3 L0 = vec3(1.);
-    
-    float dif = max(0., dot(n, w0));
-    float bac = max(0., dot(n, -w0));
-    float amb = 0.5 + 0.5 * n.y;
-    float amb2 = 0.5 - 0.5 * n.y;
-    float spe = ggx(.64, rd, w0, n) * max(0., dot(n, w0));
-
-    Material mate = getMaterial(mateid, p);
-    //return mate;
-    float occ = ao(p, n);
-    
-    vec3 radi = (2. * dif + .5 * bac + 0.5 * amb + 0.1*amb2) * mate.albedo * L0 + spe * L0 * .25;
-    //vec3 radi = (6. * dif + 5.5 * bac + 1.5 * amb + 1.*amb2) * mate * L0 + spe * L0 * .25;
-        
-    //radi *= shadow(p, w0) *occ;
-
-    //radi = mate.albedo.xyz;
-    //return vec3(pow(occ,4.));
-    //return mate;
-      //return shadow(p, w0) * vec3(1.); 	
-    return radi * 0.2;
-}
 
 vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
 {
     float rnd = 0.9 + 0.1 * hash12(uv.xy);
     float t = 0.01;
     vec2 res = vec2(1e9);
+    bool hit = false;
     
     for(int i = 0; i < MARCHING_STEPS; ++i)
     {
         res = map(ro + t * rd);
         res.x = abs(res.x) * rnd * MARCHING_STEP_SCALE;
-        if(res.x < 0.0005 + 0.0002 * t || t > FAR)
-        	break;
+        if (res.x < 0.0005 + 0.0002 * t)
+        {
+            hit = true;
+            break;
+        }
+        if (t > FAR + (1. - haha) * 100.)
+        {
+            break;
+        }
         
         t += res.x;
     }
+    if (!hit) t = -1.;
 
     return vec2(t, res.y);
 }
 
-#if !PATHTRACER
-vec3 scene(vec3 ro, vec3 rd, vec2 uv)
-{
-    vec3 col = vec3(0.);
-    float rnd = 0.9 + 0.1 * hash12(uv.xy);
-    
-    float t = 0.01, d = 1e10;
-    
-    vec2 res = intersect(ro, rd, uv);
-
-    t = res.x;
-    
-    if(t < FAR)
-    {
-        vec3 p = ro + t * rd;
-        vec3 n = getNormal(p, t);
-        col = shading(p, n, ro, rd, res.y);
-    }
-    
-    //col=mix(col, vec3(0.4,0.7,1.), 1.-exp(-.0001*t*t));
-    //col=mix(col, vec3(0), 1.-exp(-.004*t*t));
-
-    return col;
-}
-#else
 
 float schlickFresnel(float F0, float lightDotHalf)
 {
@@ -721,7 +669,7 @@ vec4 sampleLight(vec3 pos, vec3 V, vec3 n, Material mate)
     //float occ = ao(pos, n);
 
     if(mate.id == MAT_TREE_LEAVES)
-    col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha + sunCol*max(0.,dot(-n, sunDir)* vec3(0.353, 0.518, 0.102) * 0.05)) / lightSelectPdf;
+    col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha + sunCol*max(0.,dot(-n, sunDir)* vec3(0.353, 0.518, 0.102) * 0.1)) / lightSelectPdf;
     else
     col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha) / lightSelectPdf;
     return vec4(col, lightSelectPdf);
@@ -819,6 +767,17 @@ vec4 sampleBsdf(
     return vec4(phongBrdf(L, V, worldNormal, pos, mate), pdf);
 }
 
+vec3 background(vec3 ro, vec3 rd)
+{
+    vec3 pos = ro + FAR * rd;
+    vec3 skyCol = vec3(1.) * smoothstep(.0,.5, fbm(rd.xy*2.));
+    return skyCol;
+    //float d = length(pos.xy + vec2(0, 30.)) - 60.;
+    float d = length(pos.xy+vec2(50,-20.)) - 10.;
+    d = smoothstep(0., 1., d);
+    return mix(vec3(.9, .9, 1.)*.1, skyCol, d);
+}
+
 vec3 scene(vec3 ro, vec3 rd, vec2 uv)
 {
     vec2 hit = intersect(ro, rd, FAR);
@@ -832,24 +791,27 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
     // bounces
     for (int i = 0; i < MAX_BOUNCES; ++i)
     {
-        if (hit.x > FAR)
+        vec3 pos = ro + hit.x * rd;
+
+        if (hit.x < 0.)
         {
             // indirect part
             // it has to finally hit a light or the sky to have color
             // or there will be only direct part
-            Lo = Lo + throughput * vec3(0., .5, 1.) * .01;
+            Lo = Lo + throughput * vec3(0., .5, 1.) * .003;
+            //Lo += background(ro, rd);
             break;
         }
-
-        vec3 pos = ro + hit.x * rd; 
 
         vec3 n = getNormal(pos, hit.x);
 
         Material mate = getMaterial(hit.y, pos);
 
-        if(mate.id == MAT_TREE_TRUNK || (pos.y<=.5))
+        if(mate.id == MAT_TREE_TRUNK || (pos.y<=.2))
         n = bump_mapping(pos*.5, n, 200. / max(iResolution.x, iResolution.y));
 
+        if (mate.id == MAT_TREE_LEAVES)
+            n += sunDir, n = normalize(n);
 
         vec3 nextRd = rd, nextRo = pos;
 
@@ -892,24 +854,29 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
         ro = nextRo;
     }
 
-    Lo = mix(Lo, vec3(0., .5, 1.) * .01, 1. - exp(-.0005 * t * t));
+    Lo = mix(Lo, vec3(0., .5, 1.) * .003, (1. - exp(-.0005 * t * t)));
 
     return Lo;
 
 }
-#endif
-
 
 vec4 mainImage(vec2 fragCoord)
 {
-    debugFragCoord = fragCoord;
-    debugTexture[debugFragCoord] = float4(0., 0., 0., 0.);
-
-    // only update 1 out of 4 pixels when moving camera
     if (iCameraDirty > 0.)
     {
+        MAX_BOUNCES = 1;//  iCameraDirty > 0. ? 3 : 3;
+        MARCHING_STEPS = 128;// iCameraDirty > 0. ? 128 : 1024;
+        MARCHING_STEP_SCALE = 5.;// iCameraDirty > 0. ? 5. : 1.;
+
+        // only update 1 out of 4 pixels when moving camera
         if (any( (uint2(fragCoord) ) % 2 != 0))
             return vec4(0,0,0,1);
+    }
+    else
+    {
+        MAX_BOUNCES = 3;//  iCameraDirty > 0. ? 3 : 3;
+        MARCHING_STEPS = 1024;// iCameraDirty > 0. ? 128 : 1024;
+        MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
     }
 
     seed = iGlobalTime + iResolution.y * fragCoord.x / iResolution.x + fragCoord.y / iResolution.y;
@@ -932,7 +899,7 @@ vec4 mainImage(vec2 fragCoord)
     //vec3 up = normalize(cross(forward, right));
     vec3 up = normalize(cross(right, forward));
 
-    vec3 rd = normalize(p.x * right + p.y * up + 2. * forward);
+    vec3 rd = normalize(p.x * right + p.y * up + 1.8 * forward);
 
 
     vec3 finalCol = scene(ro, rd, p);
