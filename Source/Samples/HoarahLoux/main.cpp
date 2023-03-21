@@ -3,11 +3,11 @@
 
 #define MAX_PASSES 5
 #define MAX_CONTROLLABLE_VARS 5
-#define DEFAULT_WIDTH 1280
-#define DEFAULT_HEIGHT 720
+//#define DEFAULT_WIDTH 1280
+//#define DEFAULT_HEIGHT 720
 
-//#define DEFAULT_WIDTH 1024
-//#define DEFAULT_HEIGHT 1024
+#define DEFAULT_WIDTH 1024
+#define DEFAULT_HEIGHT 1024
 
 
 static std::string getFilenameFromPath(const std::string& path)

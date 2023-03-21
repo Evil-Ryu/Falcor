@@ -28,7 +28,7 @@ static int MARCHING_STEPS = 128;// iCameraDirty > 0. ? 128 : 1024;
 static float MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
 
 #define PATHTRACER 1
-#define FAR 100.
+#define FAR 1000.
 //#define MAX_BOUNCES 3
 #define INTER_THRESHOLD .001
 #define EPSILON 			0.0001
@@ -151,7 +151,7 @@ Material getMaterial(float id, vec3 p)
         vec3 col = fractalMate(p.xzy);
 
         col = mix(vec3(1.1, .1, .0), col, smoothstep(3.5, 4.9, p.y));
-        col = mix(vec3(.12, .3, .1), col, 1. - smoothstep(6., 25., p.y));
+        //col = mix(vec3(.12, .3, .1), col, 1. - smoothstep(6., 25., p.y));
 
         mate.albedo = col;
     }
@@ -267,7 +267,7 @@ float fractal(vec3 p)
 	for(int i=0; i < iter;i++)
 	{
         float a = 2.;
-        if (i == 3 && q.x<-44.) a = 2.4;
+        //if (i == 3 && q.x<-44.) a = 2.4;
 		p = a*clamp(p, -c, c) - p;
 		float k = max(1. / dot(p, p), 0.03);
 		p *= k;
@@ -302,10 +302,10 @@ vec3 fractalMate(vec3 p)
         //acc += length(p0.xz - p.xz);
     }
 
-    //return vec3(.4, .5, .25) + vec3(.3, .2, .1) * cos(6.28*(vec3(.4)*acc3));
-    vec3 k = vec3(.3, .2, .2);
-    if (q.z < 4.8) k = vec3(.5, .4, .2);
-    return vec3(.4, .4, .3) + k * cos(6. * (vec3(.5) * acc3));
+    return vec3(.4, .5, .25) + vec3(.25, .2, .1) * cos(6.28*(vec3(.4)*acc3));
+    //vec3 k = vec3(.3, .2, .2);
+    //if (q.z < 4.8) k = vec3(.5, .4, .2);
+    //return vec3(.4, .4, .3) + k * cos(6. * (vec3(.5) * acc3));
 
 }
 
@@ -578,6 +578,23 @@ vec2 map(vec3 p)
     q.y += terrianHeight(q.z);
     vec2 r4 = vec2(fractal(q.xzy), MAT_FRACTAL);
 
+
+    // begin skybox,  for build skybox for espen
+    float s0 = box(p - vec3(6., 4, -23.5), vec3(1.2));
+    r4.x = max(r4.x,-s0);
+
+    s0 = box(p - vec3(6.5, 2., -8.5), vec3(1.4));
+    //r4.x = min(r4.x, s0);
+    r4.x = max(r4.x, -s0);
+
+    if (p.z < -79.) r4.x = 10000.;
+    if (p.z > 45.) r4.x = 10000.;
+    if (p.y > 80.) r4.x = 10000.;
+    // end skybox
+
+
+
+
     //p.x -= sin(p.z * .2+3.) * 1.55;
     p.xz = mul(rot(.1), p.xz);
     vec2 r6 = vec2(box(p + vec3(79,0,0), vec3(70, 1e5, 1e5)), MAT_FRACTAL);
@@ -590,11 +607,11 @@ vec2 map(vec3 p)
 
     //return r4;
 
-    vec2 r = r0;
-    if (r1.x < r.x) r = r1;
-    if (r2.x < r.x) r = r2;
+    vec2 r = r4;
+    //if (r1.x < r.x) r = r1;
+    //if (r2.x < r.x) r = r2;
     if (r4.x < r.x) r = r4;
-    if (r5.x < r.x) r = r5;
+    //if (r5.x < r.x) r = r5;
 
     return r;
 
@@ -623,9 +640,20 @@ float shadow(vec3 ro, vec3 rd)
     return clamp(s, 0., 1.);
 }
 
+float ao(vec3 p, vec3 n)
+{
+    float r = 0.0, w = 1.0, d;
+    for (float i = 1.0; i < 5.0 + 1.1; i++)
+    {
+        d = i / 5.;
+        r += w * (d - map(p + n * d).x);
+        w *= 0.5;
+    }
+    return 1.0 - clamp(r, 0., 1.);
+}
 
-static vec3 sunDir = normalize(vec3(-.5, 1., -.2));
-//static vec3 sunDir = normalize(vec3(0., 1., 0.));
+//static vec3 sunDir = normalize(vec3(-.5, 1., -.2));
+static vec3 sunDir = normalize(vec3(-1,.5,1));
 //static vec3 sunCol = vec3(253., 184., 19.) / 256.;
 static vec3 sunCol = vec3(1.);
 
@@ -711,6 +739,19 @@ vec4 sampleLight(vec3 pos, vec3 V, vec3 n, Material mate)
     col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha + sunCol*max(0.,dot(-n, sunDir)* mate.albedo * 0.1)) / lightSelectPdf;
     else
     col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha) / lightSelectPdf;
+
+    // begin skybox
+#if 0
+    float occ = ao(pos, n);
+    col *= 2;
+    vec3 skycol = vec3(0., .5, 1.) * .003;
+    col += .1 * (sunCol * phongBrdf(-sunDir, V, n, pos, mate) * max(0., dot(n, -sunDir))) / lightSelectPdf;
+    col += max(0., n.y) * skycol * 1.;
+    col *= occ;
+#endif
+    //col = .05 + .95 * smoothstep(0.3, 1., occ) * vec3(1);
+    //col = occ * occ * vec3(1);
+    //end skybox
     return vec4(col, lightSelectPdf);
 }
 
@@ -901,7 +942,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
         ro = nextRo;
     }
 
-    //Lo = mix(Lo, skycol, (1. - exp(-.000005 * t * t * t)));
+    Lo = mix(Lo, skycol, (1. - exp(-.00005 * t * t)));
     //Lo = mix(Lo, vec3(0., .5, 1.) * .003, smoothstep(8.,2.,4.*(length(uv*vec2(1.,2) + vec2(1.3, -2)))));
 
     return Lo;
@@ -949,7 +990,7 @@ vec4 mainImage(vec2 fragCoord)
     //vec3 up = normalize(cross(forward, right));
     vec3 up = normalize(cross(right, forward));
 
-    vec3 rd = normalize(p.x * right + p.y * up + 1.8 * forward);
+    vec3 rd = normalize(p.x * right + p.y * up + 1. * forward);
 
 
     vec3 finalCol = scene(ro, rd, p);
