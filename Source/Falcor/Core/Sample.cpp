@@ -106,7 +106,10 @@ namespace Falcor
             {
                 switch (keyEvent.key)
                 {
-                case Input::Key::F12:
+                //begin limin: my stupid keyboard needs fn+= for F12, which triggers segfault in kernel, so I have to replace it with something else
+                //case Input::Key::F12:
+                case Input::Key::M:
+                //end limin
                     mCaptureScreen = true;
                     break;
 #if FALCOR_ENABLE_PROFILER

@@ -6,6 +6,10 @@
 #define DEFAULT_WIDTH 1280
 #define DEFAULT_HEIGHT 720
 
+//#define DEFAULT_WIDTH 1024
+//#define DEFAULT_HEIGHT 1024
+
+
 static std::string getFilenameFromPath(const std::string& path)
 {
     std::size_t found = path.find_last_of("/\\");
@@ -45,6 +49,9 @@ void ShaderEditor::resetCamera()
    
     camera->setPosition(float3(-1.32, 2.18, 28.26));
     camera->setTarget(float3(-1.5, 2.3, 27.3));
+    // for skybox
+    /*camera->setPosition(float3(6.64, 10., -1.79));
+    camera->setTarget(float3(6.53, 10.,-2.8));*/
     camera->setUpVector(float3(0, 1, 0));
 
     {
@@ -52,6 +59,60 @@ void ShaderEditor::resetCamera()
         float farZ = 1000.f;
         camera->setDepthRange(nearZ, farZ);
     }
+}
+
+// for capturing skybox
+void ShaderEditor::RotateCamera90AroundUp()
+{
+    auto mpCamera = mCameras[0];
+
+    float3 camPos = mpCamera->getPosition();
+    float3 camTarget = mpCamera->getTarget();
+    float3 camUp = mpCamera->getUpVector();
+
+    float3 viewDir = glm::normalize(camTarget - camPos);
+
+    float3 sideway = glm::cross(viewDir, normalize(camUp));
+
+    float2 rotation = float2(glm::pi<float>() / 2., glm::pi<float>() / 2.);
+
+    // Rotate around x-axis
+    //glm::quat qy = glm::angleAxis(rotation.y, sideway);
+    //glm::mat3 rotY(qy);
+    //viewDir = viewDir * rotY;
+    //camUp = camUp * rotY;
+
+    // Rotate around y-axis
+    glm::quat qx = glm::angleAxis(rotation.x, camUp);
+    glm::mat3 rotX(qx);
+    viewDir = viewDir * rotX;
+
+    mpCamera->setTarget(camPos + viewDir);
+    mpCamera->setUpVector(camUp);
+}
+
+void ShaderEditor::RotateCamera90AroundRight()
+{
+    auto mpCamera = mCameras[0];
+
+    float3 camPos = mpCamera->getPosition();
+    float3 camTarget = mpCamera->getTarget();
+    float3 camUp = mpCamera->getUpVector();
+
+    float3 viewDir = glm::normalize(camTarget - camPos);
+
+    float3 sideway = glm::cross(viewDir, normalize(camUp));
+
+    float2 rotation = float2(glm::pi<float>() / 2., glm::pi<float>() / 2.);
+
+    // Rotate around x-axis
+    glm::quat qy = glm::angleAxis(rotation.y, sideway);
+    glm::mat3 rotY(qy);
+    viewDir = viewDir * rotY;
+    camUp = camUp * rotY;
+
+    mpCamera->setTarget(camPos + viewDir);
+    mpCamera->setUpVector(camUp);
 }
 
 void ShaderEditor::createFbos(uint32_t width, uint32_t height)
@@ -251,7 +312,7 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
 {
     mCameraDirty = mpCamCtrl->update();
 
-    mAccumulationRestart = (mPrevCameraDirty && !mCameraDirty);
+    mAccumulationRestart = mAccumulationRestart || (mPrevCameraDirty && !mCameraDirty);
     
     mPrevCameraDirty = mCameraDirty;
 
@@ -282,6 +343,8 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
     //pRenderContext->blit(passOutput->getSRV(), pTargetFbo->getRenderTargetView(0));
 
     executeBlitPass(pRenderContext, passOutput, pTargetFbo);
+
+    mAccumulationRestart = false;
 }
 
 
@@ -425,6 +488,19 @@ bool ShaderEditor::onKeyEvent(const KeyboardEvent& keyEvent)
                 HotReloadFlags reloaded = HotReloadFlags::None;
                 if (Program::reloadAllPrograms()) reloaded |= HotReloadFlags::Program;
                 this->onHotReload(reloaded);
+                break;
+            }
+            // for making skybox for espen, changing view direction to next cube face
+            case Input::Key::J:
+            {
+                RotateCamera90AroundUp();
+                mAccumulationRestart = true;
+                break;
+            }
+            case Input::Key::K:
+            {
+                RotateCamera90AroundRight();
+                mAccumulationRestart = true;
                 break;
             }
             

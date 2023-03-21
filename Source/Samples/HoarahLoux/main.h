@@ -44,6 +44,7 @@ private:
     bool mCameraDirty = false;
     bool mPrevCameraDirty = false;
     bool mAccumulationRestart = false;
+    bool mCaptureScreen = false;
 
     Texture::SharedPtr mpTex;
     std::string mTexPath;
@@ -75,4 +76,9 @@ private:
     void resetCamera();
     void createFbos(uint32_t width, uint32_t height);
     void createDebugResources();
+
+
+    // for capture skybox
+    void RotateCamera90AroundUp();
+    void RotateCamera90AroundRight();
 };
