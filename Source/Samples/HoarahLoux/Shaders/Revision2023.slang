@@ -163,7 +163,8 @@ Material getMaterial(float id, vec3 p)
     {
         /*mate.albedo = mix(vec3(0.353, 0.518, 0.152)*.5,
             vec3(0.655, 0.384, 0.004), smoothstep(8.,17.,length(p.xy)));*/
-        mate.albedo = mix(vec3(1.000, 0.400, 0.000) * .5, vec3(1.000, 0.635, 0.000),smoothstep(8., 17., length(p.xy)));
+        //mate.albedo = mix(vec3(1.000, 0.400, 0.000) * 2.5, vec3(1.000, 0.635, 0.000),smoothstep(8., 17., length(p.xy)));
+        mate.albedo = vec3(1.000, 0.400, 0.000) * 2.5;
     }
     else if (id == MAT_FLOWER)
     {
@@ -806,15 +807,18 @@ vec4 sampleBsdf(
     return vec4(phongBrdf(L, V, worldNormal, pos, mate), pdf);
 }
 
-vec3 background(vec3 ro, vec3 rd)
+vec3 background(vec3 ro, vec3 rd, vec2 uv)
 {
     vec3 pos = ro + FAR * rd;
-    vec3 skyCol = vec3(1.) * smoothstep(.0,.5, fbm(rd.xy*2.));
-    return skyCol;
-    //float d = length(pos.xy + vec2(0, 30.)) - 60.;
-    float d = length(pos.xy+vec2(50,-20.)) - 10.;
-    d = smoothstep(0., 1., d);
-    return mix(vec3(.9, .9, 1.)*.1, skyCol, d);
+    //float k = smoothstep(0., .8, uv.y);
+    float f = smoothstep(.4, 1., fbm(uv * vec2(4., 10.)));
+
+    vec3 red = vec3(195, 30, 10) / 255. * .3;
+    //vec3 red = vec3(0., .5, 1.) * .003;
+    red *= red;
+    return mix(vec3(0., .5, 1.) * .003, mix(red, vec3(0.), (1.-f*f)*smoothstep(-1.,.8,uv.y)), smoothstep(-.5,.9,uv.y));
+
+    //return mix(red, vec3(0., .5, 1.) * .003, smoothstep(.8,0.,f));
 }
 
 vec3 scene(vec3 ro, vec3 rd, vec2 uv)
@@ -826,8 +830,8 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
     vec3 throughput = vec3(1.);
 
     vec3 Lo = vec3(0);
-    vec3 skycol = vec3(0., .5, 1.) * .003;
-
+    vec3 skycol = background(ro, rd, uv);// vec3(0., .5, 1.) * .003;
+    //return skycol;
     // bounces
     for (int i = 0; i < MAX_BOUNCES; ++i)
     {
@@ -901,7 +905,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
         ro = nextRo;
     }
 
-    //Lo = mix(Lo, skycol, (1. - exp(-.000005 * t * t * t)));
+    //Lo = mix(Lo, skycol*0.1, (1. - exp(-.00003 * t * t)));
     //Lo = mix(Lo, vec3(0., .5, 1.) * .003, smoothstep(8.,2.,4.*(length(uv*vec2(1.,2) + vec2(1.3, -2)))));
 
     return Lo;
