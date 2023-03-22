@@ -27,14 +27,9 @@ static int MAX_BOUNCES = 1;//  iCameraDirty > 0. ? 3 : 3;
 static int MARCHING_STEPS = 128;// iCameraDirty > 0. ? 128 : 1024;
 static float MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
 
-#define PATHTRACER 1
 #define FAR 100.
-//#define MAX_BOUNCES 3
 #define INTER_THRESHOLD .001
 #define EPSILON 			0.0001
-
-#define EVENT_REFLECTION 1.
-#define EVENT_TRANSMISSION 2.
 
 #define PI 3.1415926535
 #define DE_ITER 14
@@ -45,6 +40,7 @@ static float MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
 #define MAT_FLOWER 3.
 #define MAT_FLOWER_LEAVES 4.
 #define MAT_WALL 5.
+#define HEIGHT(z) sin(z * .2  + 1.) * 2.
 
 static float pixelSize;
 
@@ -110,19 +106,12 @@ float fbm(vec2 p)
     return f;
 }
 
-
 float bump(vec3 p, vec3 n)
 {
     p *= iResolution.x / 20.;
     p.y *= .5;
     p.xz *= 2.;
     return (fbm(p.xy) * abs(n.z) + noise(p.xz) * abs(n.y) + noise(p.yz) * abs(n.x)) / 3.;
-}
-
-float terrianHeight(float z)
-{
-    return sin(z * .2  + 1.) * 2.;
-    //return -smoothstep(30., 13., z) * 3.;
 }
 
 vec3 bump_mapping(vec3 p, vec3 n, float weight)
@@ -135,8 +124,6 @@ vec3 bump_mapping(vec3 p, vec3 n, float weight)
     return normalize(n + g * weight);
 }
 
-
-
 Material getMaterial(float id, vec3 p)
 {
     Material mate;
@@ -147,7 +134,7 @@ Material getMaterial(float id, vec3 p)
     if (id == MAT_FRACTAL)
     {
         p = p + vec3(-35, 4.5, 16);
-        p.y += terrianHeight(p.z);
+        p.y += HEIGHT(p.z);
         vec3 col = fractalMate(p.xzy);
 
         col = mix(vec3(1.1, .1, .0), col, smoothstep(3.5, 4.9, p.y));
@@ -161,10 +148,7 @@ Material getMaterial(float id, vec3 p)
     }
     else if (id == MAT_TREE_LEAVES)
     {
-        /*mate.albedo = mix(vec3(0.353, 0.518, 0.152)*.5,
-            vec3(0.655, 0.384, 0.004), smoothstep(8.,17.,length(p.xy)));*/
-        //mate.albedo = mix(vec3(1.000, 0.400, 0.000) * 2.5, vec3(1.000, 0.635, 0.000),smoothstep(8., 17., length(p.xy)));
-        mate.albedo = vec3(1.000, 0.400, 0.000) * 2.5;
+        mate.albedo = vec3(1.000, 0.400, 0.000) * 3.;
     }
     else if (id == MAT_FLOWER)
     {
@@ -179,13 +163,6 @@ Material getMaterial(float id, vec3 p)
         mate.albedo = vec3(0.690, 0.565, 0.451);
     }
     return mate;
-}
-
-float hash12(vec2 p)
-{
-    p=fract(p*vec2(5.3983, 5.4427));
-    p+=dot(p.yx, p.xy + vec2(21.5351, 14.3137));
-	return fract(p.x * p.y * 95.4337);
 }
 
 vec2 hash21(float p)
@@ -203,49 +180,42 @@ static float scale = 3.;
 static vec3 mtl = vec3(0.5, 0.5, 0.6);
 static vec4 orb = vec4(1000);
 
-void sphere_fold(inout vec3 z, inout float dz) {
-    float r2 = dot(z, z);
-    if (r2 < min_radius2) {
-        float temp = (fixed_radius2 / min_radius2);
-        z *= temp;
-        dz *= temp;
-    }
-    else if (r2 < fixed_radius2) {
-        float temp = (fixed_radius2 / r2);
-        z *= temp;
-        dz *= temp;
-    }
-}
-
-void box_fold(inout vec3 z, inout float dz) {
-    z = clamp(z, -folding_limit, folding_limit) * 2.0 - z;
-}
-static float haha = 1.;
-float mb(vec3 z, bool yeah)
+float mb(vec3 z, float y)
 {
-    haha = 1.;
     fixed_radius2 = 2.;
     min_radius2 = 0.1;
     folding_limit = 1.4;
     scale = 3.;
-    float iter = 9.;
-    if(!yeah)z.x = mod(z.y + 1.0, 2.0) - 1.0;
+
+    if(y<1.)z.x = mod(z.y + 1.0, 2.0) - 1.0;
     else
     {
         folding_limit = 1.8;
-        //if (z.x < 0.) folding_limit = 2.;
         if (z.y > -3.16) return 1e2;
         z.z = mod(z.z, 2.0) - 1.0;
     }
     orb = vec4(1000);
     vec3 offset = z;
     float dr = 1.0;
-    for (int n = 0; n < iter; ++n)
+    for (int n = 0; n < 9.; ++n)
     {
         z.xy = mul(mat2(.54, .84, -.84, .54), z.xy);
 
-        box_fold(z, dr);
-        sphere_fold(z, dr);
+        z = clamp(z, -folding_limit, folding_limit) * 2.0 - z;
+
+        float r2 = dot(z, z);
+        if (r2 < min_radius2)
+        {
+            float temp = (fixed_radius2 / min_radius2);
+            z *= temp;
+            dr *= temp;
+        }
+        else if (r2 < fixed_radius2)
+        {
+            float temp = (fixed_radius2 / r2);
+            z *= temp;
+            dr *= temp;
+        }
 
         z = scale * z + offset;
         dr = dr * abs(scale) + 1.;
@@ -275,7 +245,7 @@ float fractal(vec3 p)
 		scale *= k;
 	}
 
-    float l = min(length(p.xz), mb(p*1.8, false)/1.8+.01);  // 2.3
+    float l = min(length(p.xz), mb(p*1.8, 0.)/1.8+.01);  // 2.3
     
 	float rxy = l - .4;
 	float n = l * p.z;
@@ -286,27 +256,18 @@ float fractal(vec3 p)
 vec3 fractalMate(vec3 p)
 {
     vec3 q = p;
-    float acc = 100.;
-    vec3 acc3 = vec3(0);
+    vec3 acc = vec3(0);
     for(int i = 0; i < 8; i++)
     {
-        float r2Old = dot(p, p);
-        vec3 p0 = 2. * clamp(p, -c, c) - p;
-        
-        acc3 += distance(p,p0) * max(1./r2Old, .3);
-        p = p0;
-        float r2 = dot(p, p);
-        acc = min(acc, r2Old + r2);
-
-        float k = max(1. / r2, 0.03);
-		p *= k;
-        //acc += length(p0.xz - p.xz);
+        vec3 p1 = 2. * clamp(p, -c, c) - p;
+        acc += distance(p, p1) * max(1./ dot(p, p), .3);
+		p = p1 * max(1. / dot(p1, p1), 0.03);;
     }
 
-    //return vec3(.4, .5, .25) + vec3(.3, .2, .1) * cos(6.28*(vec3(.4)*acc3));
+    //return vec3(.4, .5, .25) + vec3(.3, .2, .1) * cos(6.28*(vec3(.4)*acc));
     vec3 k = vec3(.3, .2, .2);
     if (q.z < 4.8) k = vec3(.5, .4, .2);
-    return vec3(.4, .4, .3) + k * cos(6. * (vec3(.5) * acc3));
+    return vec3(.4, .4, .3) + k * cos(6. * (vec3(.5) * acc));
 
 }
 
@@ -322,11 +283,6 @@ float smin(float a, float b, float k)
 
 }
 
-float smax(float a, float b, float k)
-{
-    return smin(a, b, -k);
-}
-
 vec2 fold(vec2 p, float s, out float id)
 {
     float a = PI / s + atan2(p.x, p.y);
@@ -337,11 +293,11 @@ vec2 fold(vec2 p, float s, out float id)
     return p;
 }
 
-float dbar(vec3 p, vec3 a, vec3 b, float r)
+float dbar2(vec3 p, vec3 a, vec3 b, vec3 r)
 {
     vec3 pa = p - a, ba = b - a;
     float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    return length(pa - ba * h) - r;
+    return (length((pa - ba * h) / r) - 1.) * min(min(r.x, r.y), r.z);
 }
 
 vec4 dBranches(vec3 p, float i, float id, float len)
@@ -359,10 +315,10 @@ vec4 dBranches(vec3 p, float i, float id, float len)
     }
     else if (i > 0.) k *= 0.2;
 
-    float dcap = dbar(p + vec3(0., 0., len),
+    float dcap = dbar2(p + vec3(0., 0., len),
         vec3(0., 0., len),
         vec3(0., 0., len) + len * l * dir,
-        k);
+        vec3(k));
 
     return vec4(p, dcap);
 }
@@ -470,13 +426,6 @@ vec2 tree(vec3 z0)
     return vec2(d * .5, mateid);
 }
 
-float dbar2(vec3 p, vec3 a, vec3 b, vec3 r)
-{
-    vec3 pa = p - a, ba = b - a;
-    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    return (length((pa - ba * h) / r) - 1.) * min(min(r.x, r.y), r.z);
-}
-
 vec4 dPedals(vec3 p, float i, float id, float len, float scale)
 {
     p.z += sin(p.y * id / 2.) * 0.05;
@@ -559,37 +508,28 @@ float box(vec3 p, vec3 b)
 }
 vec2 map(vec3 p)
 {
-    //return length(p) - 1.;
     float mateid = MAT_FRACTAL;
 
+    vec3 q = p - vec3(0.87, 3., 1.82);
 
-    vec3 q = (p - vec3(0.87, 3., 1.82));
+    vec2 r0 = tree((q - vec3(0,.1,2)) * .37); r0.x /= .37;
+    r0.x = smin(r0.x, (length(q*vec3(1,.5,1) - vec3(.4, .5, 2.3)) - .4), .05);
 
-
-    vec3 q1 = q + vec3(0,-.1,-2.);
-    vec2 r0 = tree(q1 * .37); r0.x /=.37;
-
-    q1 = q;
-    vec2 r1 = flower(1.9*(q1 + vec3(2.8, 2.3, -8.)), 0.); r1.x /= 1.9;
+    vec2 r1 = flower(1.9*(q + vec3(2.8, 2.3, -8)), 0.); r1.x /= 1.9;
     
-    q1 = q;
-    vec2 r2 = flower(1.9 * (q1 + vec3(4., 0.5, -6.)), 1.); r2.x /= 1.9;
+    vec2 r2 = flower(1.9 * (q + vec3(4, .5, -6)), 1.); r2.x /= 1.9;
 
     q = p + vec3(-35, 4.5, 16);
-    q.y += terrianHeight(q.z);
+    q.y += HEIGHT(q.z);
     vec2 r4 = vec2(fractal(q.xzy), MAT_FRACTAL);
 
-    //p.x -= sin(p.z * .2+3.) * 1.55;
     p.xz = mul(rot(.1), p.xz);
     vec2 r6 = vec2(box(p + vec3(79,0,0), vec3(70, 1e5, 1e5)), MAT_FRACTAL);
-    //r4.x = max(r4.x, -r6.x);
 
     if (p.z > 6.)p.y -= sin(p.z * .3 + 2.) * 2.;
     else p.y -= sin(p.z * .1);
     
-    vec2 r5 = vec2(max(r6.x, mb((p * 0.1 - vec3(-3., 3.4+smoothstep(10.,-1.,p.z)*0.4, 0.)), true) / 0.1), MAT_WALL);
-
-    //return r4;
+    vec2 r5 = vec2(max(r6.x, mb((p * 0.1 - vec3(-3., 3.4+smoothstep(10.,-1.,p.z)*0.4, 0.)), 1.) / 0.1), MAT_WALL);
 
     vec2 r = r0;
     if (r1.x < r.x) r = r1;
@@ -648,7 +588,7 @@ vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
             hit = true;
             break;
         }
-        if (t > FAR + (1. - haha) * 100.)
+        if (t > FAR)
         {
             break;
         }
@@ -664,11 +604,6 @@ vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
 float schlickFresnel(float F0, float lightDotHalf)
 {
     return F0 + (1. - F0) * pow(1.0 - lightDotHalf, 5.);
-}
-
-vec3 ortho(vec3 v)
-{
-    return abs(v.x) > abs(v.z) ? vec3(-v.y, v.x, 0.0) : vec3(0.0, -v.z, v.y);
 }
 
 vec3 phongBrdf(vec3 toLight, vec3 toEye, vec3 normal, vec3 pos, Material mate)
@@ -696,23 +631,24 @@ vec3 phongBrdf(vec3 toLight, vec3 toEye, vec3 normal, vec3 pos, Material mate)
 }
 
 
-vec4 sampleLight(vec3 pos, vec3 V, vec3 n, Material mate)
+vec3 sampleLight(vec3 pos, vec3 V, vec3 n, Material mate)
 {
     vec3 col = vec3(0);
-
-    float lightSelectPdf = 1.f;
-
-    if (lightSelectPdf < EPSILON) return vec4(0);
 
     vec3 sha = shadow(pos + 0.001*n, sunDir);
 
     //float occ = ao(pos, n);
+    col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha);
 
-    if(mate.id == MAT_TREE_LEAVES)
-    col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha + sunCol*max(0.,dot(-n, sunDir)* mate.albedo * 0.1)) / lightSelectPdf;
-    else
-    col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha) / lightSelectPdf;
-    return vec4(col, lightSelectPdf);
+    if (mate.id == MAT_TREE_LEAVES)
+        col += sunCol * max(0., dot(-n, sunDir)) * mate.albedo * 0.1;
+   
+    return col;
+}
+
+vec3 ortho(vec3 v)
+{
+    return abs(v.x) > abs(v.z) ? vec3(-v.y, v.x, 0.0) : vec3(0.0, -v.z, v.y);
 }
 
 vec3 getHemisphereSampleCosWeighted(vec3 dir, vec2 randSample, float power = 1.)
@@ -727,59 +663,6 @@ vec3 getHemisphereSampleCosWeighted(vec3 dir, vec2 randSample, float power = 1.)
 }
 
 
-vec3 getConeSampleCosWeighted(vec3 dir, float power, vec2 randSample)
-{
-    dir = normalize(dir);
-    vec3 o1 = normalize(ortho(dir));
-    vec3 o2 = normalize(cross(dir, o1));
-
-    randSample.x = 2. * PI * randSample.x;
-    randSample.y = 1.0 - pow(randSample.y, 1. / (power + 1.));
-
-    float oneminus = sqrt(1.0 - randSample.y * randSample.y);
-    return cos(randSample.x) * oneminus * o1 + sin(randSample.x) * oneminus * o2 + randSample.y * dir;
-}
-
-vec3 getPhoneSpecularSample(vec3 dir, float power, inout float seed)
-{
-    return getConeSampleCosWeighted(dir, power, seed);
-}
-
-float getPhongSpecularPdf(float shininess, vec3 worldNormal, vec3 worldRefl)
-{
-    return (shininess + 1.) / (2. * PI) * pow(max(0., dot(worldRefl, worldNormal)), shininess);
-}
-
-float LobeASelectionProb(vec3 A, vec3 B)
-{
-    const float SumA = A.x + A.y + A.z;
-    const float SumB = B.x + B.y + B.z;
-    return SumA / (SumA + SumB + 1e-6);
-}
-
-
-void AddLobeWithMIS(inout vec3 Weight, inout float Pdf, float3 LobeWeight, float LobePdf, float LobeProb)
-{
-    const float MinLobeProb = 1.1754943508e-38; // smallest normal float
-    if (LobeProb > MinLobeProb)
-    {
-        LobePdf *= LobeProb;
-        LobeWeight *= 1 / LobeProb;
-
-        // basically: LobePdf / (Pdf + LobePdf), but robust version
-        float MISWeight;
-        if (Pdf < LobePdf)
-            MISWeight = 1 / (1 + Pdf / LobePdf);
-        else if (LobePdf < Pdf)
-            MISWeight = 1 - 1 / (1 + LobePdf / Pdf);
-        else
-            MISWeight = 0.5f; // avoid (rare) inf/inf
-
-        Weight = lerp(Weight, LobeWeight, MISWeight);
-        Pdf += LobePdf;
-    }
-}
-
 vec4 sampleBsdf(
     vec3 pos,
     vec3 worldNormal,
@@ -788,53 +671,28 @@ vec4 sampleBsdf(
     out vec3 L
 )
 {
-    // sample specular or diffuse lobe
-    const float lobePdf = LobeASelectionProb(mate.albedo * (1. - mate.F0), mate.F0);
-    float pdf = 1.;
-    vec2 rnd = hash21(seed++);
-    if (rnd.x < lobePdf)
-    {
-        L = normalize(getHemisphereSampleCosWeighted(worldNormal, hash21(seed++), 1.));
-    }
-    else
-    {
-        L = reflect(-V, worldNormal);
-        L = normalize(getConeSampleCosWeighted(L, mate.shininess, hash21(seed++)));
-    }
-
-    pdf = max(0., dot(worldNormal, L)) / PI + (mate.shininess + 1.) / (2. * PI) * pow(max(0., dot(worldNormal, L)), mate.shininess);
-
+    L = normalize(getHemisphereSampleCosWeighted(worldNormal, hash21(seed++), 1.));
+    float pdf = max(0., dot(worldNormal, L)) / PI;
     return vec4(phongBrdf(L, V, worldNormal, pos, mate), pdf);
-}
-
-vec3 background(vec3 ro, vec3 rd, vec2 uv)
-{
-    vec3 pos = ro + FAR * rd;
-    //float k = smoothstep(0., .8, uv.y);
-    float f = smoothstep(.4, 1., fbm(uv * vec2(4., 10.)));
-
-    vec3 red = vec3(195, 30, 10) / 255. * .3;
-    //vec3 red = vec3(0., .5, 1.) * .003;
-    red *= red;
-    return mix(vec3(0., .5, 1.) * .003, mix(red, vec3(0.), (1.-f*f)*smoothstep(-1.,.8,uv.y)), smoothstep(-.5,.9,uv.y));
-
-    //return mix(red, vec3(0., .5, 1.) * .003, smoothstep(.8,0.,f));
 }
 
 vec3 scene(vec3 ro, vec3 rd, vec2 uv)
 {
-    vec2 hit = intersect(ro, rd, FAR);
-
-    float t = hit.x;
-
     vec3 throughput = vec3(1.);
-
     vec3 Lo = vec3(0);
-    vec3 skycol = background(ro, rd, uv);// vec3(0., .5, 1.) * .003;
+
+    float f = smoothstep(.4, 1., fbm(uv * vec2(4., 10.)));
+    vec3 skycol = vec3(195, 30, 10) / 255. * .5;
+    skycol = mix(vec3(0), mix(skycol*skycol, vec3(0.), (1. - f * f) * smoothstep(-1., .8, uv.y)), smoothstep(-.0, 2., uv.y));
+
     //return skycol;
+    // 
     // bounces
     for (int i = 0; i < MAX_BOUNCES; ++i)
     {
+        vec2 hit = intersect(ro, rd, FAR);
+        float t = hit.x;
+
         vec3 pos = ro + hit.x * rd;
 
         if (hit.x < 0.)
@@ -851,62 +709,48 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
 
         Material mate = getMaterial(hit.y, pos);
         vec3 q = pos;
-        q.y -= terrianHeight(q.z);
-        if (mate.id == MAT_TREE_TRUNK || (q.y <= .05))
-        {
-            
-            n = bump_mapping(q * .5, n, 100. / max(iResolution.x, iResolution.y));
-        }
+        q.y -= HEIGHT(q.z);
+
+        float a = 0., b = 0.;
+        if (mate.id == MAT_TREE_TRUNK)
+            a = .2, b = 200.;
+        if (q.y <= .05)
+            a = .5, b = 100.;
+        if(a > 0.)
+            n = bump_mapping(q * a, n, b / max(iResolution.x, iResolution.y));
 
         if (mate.id == MAT_TREE_LEAVES)
-        {
-         //   n += sunDir, n = normalize(n);
             sunDir = normalize(vec3(-1, 1, 1));
-        }
 
         vec3 nextRd = rd, nextRo = pos;
 
         // can use mis to optimize
-        vec4 directLightingAndPdf = sampleLight(pos, -rd, n, mate);
+        vec3 directLighting = sampleLight(pos, -rd, n, mate);
 
         // throughput = A0C0..An-1Cn-1,  direct = AnCnLn
-        Lo += throughput * directLightingAndPdf.xyz;
+        Lo += throughput * directLighting;
+        if (mate.id != MAT_TREE_LEAVES) break;
 
-        float nextEvent = EVENT_REFLECTION;
 
         vec4 btdfAndPdf = vec4(0., 0., 0., 1.);
 
         // Sample btdf
+        btdfAndPdf = sampleBsdf(pos, n, -rd, mate, nextRd);
         
-        {
-            btdfAndPdf = sampleBsdf(pos, n, -rd, mate, nextRd);
-            nextEvent = EVENT_REFLECTION;
-        }
 
         if (btdfAndPdf.w < EPSILON) break;
 
 
-        {
-            if (nextEvent != EVENT_TRANSMISSION)
-            {
-                // Lo = A0C0L0 + A0C0A1C1L1 + ... + A0C0..AnCnLn  (A is the brdf, C is cos, L is directLight)
-                // accumulate the new brdf*cos for this round,  brdf * cos / pdf
-                throughput *= btdfAndPdf.xyz * max(0., dot(nextRd, n)) / btdfAndPdf.w;
-              
-                // this is important
-                nextRo = pos + (INTER_THRESHOLD * 2.) * n;
-            }
-
-            hit = intersect(nextRo, nextRd, FAR);
-        }
-
-
+        
+        // Lo = A0C0L0 + A0C0A1C1L1 + ... + A0C0..AnCnLn  (A is the brdf, C is cos, L is directLight)
+        // accumulate the new brdf*cos for this round,  brdf * cos / pdf
+        throughput *= btdfAndPdf.xyz * max(0., dot(nextRd, n)) / btdfAndPdf.w * .5;
+                                  
         rd = nextRd;
-        ro = nextRo;
+        ro = pos + 0.002 * n;
     }
 
     //Lo = mix(Lo, skycol*0.1, (1. - exp(-.00003 * t * t)));
-    //Lo = mix(Lo, vec3(0., .5, 1.) * .003, smoothstep(8.,2.,4.*(length(uv*vec2(1.,2) + vec2(1.3, -2)))));
 
     return Lo;
 
@@ -926,7 +770,7 @@ vec4 mainImage(vec2 fragCoord)
     }
     else
     {
-        MAX_BOUNCES = 1;//  iCameraDirty > 0. ? 3 : 3;
+        MAX_BOUNCES = 3;//  iCameraDirty > 0. ? 3 : 3;
         MARCHING_STEPS = 1024;// iCameraDirty > 0. ? 128 : 1024;
         MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
     }

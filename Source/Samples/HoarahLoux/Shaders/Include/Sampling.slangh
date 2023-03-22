@@ -135,6 +135,7 @@ vec3 getHemisphereSampleCosWeighted(vec3 dir, vec2 randSample, float power = 1.)
     return cos(randSample.x) * oneminus * o1 + sin(randSample.x) * oneminus * o2 + randSample.y * dir;
 }
 
+// Biased, will give subtle quality degrade if compared with the standard one
 vec3 getHemisphereSampleCosWeightedFast(vec3 n, vec3 randSample)
 {
     return normalize(n + randSample);
