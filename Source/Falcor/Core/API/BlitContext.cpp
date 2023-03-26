@@ -44,7 +44,7 @@ namespace Falcor
                 { "DST_INT", "0" },
             };
             Program::Desc d;
-            d.addShaderLibrary("Core/API/BlitReduction.3d.slang").vsEntry("vsMain").psEntry("psMain");
+            d.addShaderLibrary("E:/work/Falcor/Source/Falcor/Core/API/BlitReduction.3d.slang").vsEntry("vsMain").psEntry("psMain");
             pPass = FullScreenPass::create(d, defines);
             pFbo = Fbo::create();
             FALCOR_ASSERT(pPass && pFbo);

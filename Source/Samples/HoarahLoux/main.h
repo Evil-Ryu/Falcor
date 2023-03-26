@@ -71,7 +71,7 @@ private:
     void setPass(const int index);
     Texture::SharedPtr loadImage();
     void setCommonVars(FullScreenPass::SharedPtr &pass, float w, float h);
-    void executeBlitPass(RenderContext* pRenderContext, Texture::SharedPtr srcTexture, Fbo::SharedPtr dstFbo);
+    void executeBlitPass(RenderContext* pRenderContext, Texture::SharedPtr srcTexture, Fbo::SharedPtr dstFbo, float w, float h);
     void executeClearPass(RenderContext* pRenderContext, Fbo::SharedPtr Fbo);
     void resetCamera();
     void createFbos(uint32_t width, uint32_t height);

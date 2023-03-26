@@ -39,7 +39,7 @@ vec4 mainImage(vec2 fragCoord)
 
 
     col = tonemap(col);
-    col = pow(col, vec3(0.45));
+    col = pow(col, vec3(.45));
     
     col = col * 0.6 + 0.4 * col * col * (3.0 - 2.0 * col);  // contrast
 
@@ -47,7 +47,7 @@ vec4 mainImage(vec2 fragCoord)
     //col = col * 0.6 + 0.4 * col * col * (3.0 - 2.0 * col);  // contrast
     //col = mix(col, vec3(dot(col, vec3(0.33))), 0.5);  // de-satuation
     col *= 0.5 + 0.5 * pow(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), 0.1);
-
+    col = pow(col, vec3(.45));
     return vec4(col, 1.);
 }
 

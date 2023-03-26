@@ -60,7 +60,7 @@ namespace Falcor
         */
         struct Desc
         {
-            ResourceFormat colorFormat = ResourceFormat::BGRA8UnormSrgb;    ///< The color buffer format
+            ResourceFormat colorFormat = ResourceFormat::BGRA8Unorm;    ///< The color buffer format
             ResourceFormat depthFormat = ResourceFormat::D32Float;          ///< The depth buffer format
             uint32_t apiMajorVersion = 0;                                   ///< Requested API major version. If specified, device creation will fail if not supported. Otherwise, the highest supported version will be automatically selected.
             uint32_t apiMinorVersion = 0;                                   ///< Requested API minor version. If specified, device creation will fail if not supported. Otherwise, the highest supported version will be automatically selected.

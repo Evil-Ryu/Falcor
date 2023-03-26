@@ -158,11 +158,11 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    std::string path0Str = "Samples/HoarahLoux/Shaders/Revision2023.slang";
+    std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Revision2023.slang";
     mPasses[0].mPass = FullScreenPass::create(path0Str);
     mPasses[0].mShaderPath = getFilenameFromPath(path0Str);
 
-    std::string path1Str = "Samples/HoarahLoux/Shaders/PathtracerPost.slang";
+    std::string path1Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/PathtracerPost.slang";
     mPasses[1].mPass = FullScreenPass::create(path1Str);
     mPasses[1].mShaderPath = getFilenameFromPath(path1Str);
 
@@ -173,8 +173,8 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
     mControllableVars.resize(MAX_CONTROLLABLE_VARS);
 
     // create the builtin  passes
-    mBlitPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/Internal/Blit.ps.slang");
-    mClearPass = FullScreenPass::create("Samples/HoarahLoux/Shaders/Internal/Clear.ps.slang");
+    mBlitPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Internal/Blit.ps.slang");
+    mClearPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Internal/Clear.ps.slang");
 
 
     // camera
@@ -285,10 +285,11 @@ void ShaderEditor::setCommonVars(FullScreenPass::SharedPtr& pass, float w, float
     }
 }
 
-void ShaderEditor::executeBlitPass(RenderContext* pRenderContext, Texture::SharedPtr srcTexture, Fbo::SharedPtr dstFbo)
+void ShaderEditor::executeBlitPass(RenderContext* pRenderContext, Texture::SharedPtr srcTexture, Fbo::SharedPtr dstFbo, float w, float h)
 {
     mBlitPass["iChannel0Sampler"] = mpLinearSampler;
     mBlitPass["iChannel0"] = srcTexture;
+    mBlitPass["CB"]["iResolution"] = float2(w, h);
 
     mBlitPass->execute(pRenderContext, dstFbo);
 }
@@ -342,7 +343,7 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
     // blit is not working with mipmapped textures
     //pRenderContext->blit(passOutput->getSRV(), pTargetFbo->getRenderTargetView(0));
 
-    executeBlitPass(pRenderContext, passOutput, pTargetFbo);
+    executeBlitPass(pRenderContext, passOutput, pTargetFbo, width, height);
 
     mAccumulationRestart = false;
 }
