@@ -62,9 +62,6 @@ static float MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
 #define MAT_WALL 5.
 #define HEIGHT(z) sin(z * .2  + 1.) * 2.
 
-static float pixelSize;
-
-static vec3 globalCol = vec3(1.);
 
 vec2 hash21(float p)
 {
@@ -124,56 +121,50 @@ float smin(float a, float b, float k)
 }
 
 
-
-
-
-static float fixed_radius2 = 2.;
-static float min_radius2 = .1;
-static float folding_limit = 1.4;
-static float scale = 3.;
-static vec3 mtl = vec3(.5, .5, .6);
-
 float mb(vec3 z, float y)
 {
-    fixed_radius2 = 2.;
-    min_radius2 = .1;
-    folding_limit = 1.4;
-    scale = 3.;
+    //fixed_radius2 = 2.;
+    //min_radius2 = .1;
+    //folding_limit = 1.4;
+    //scale = 3.;
+
+    vec4 params = vec4(2., .1, 1.4, 3.);
 
     if(y<1.)z.x = mod(z.y + 1., 2.) - 1.;
     else
     {
-        folding_limit = 1.8;
+        params.z = 1.8;
+        params.x = 2.3;
         if (z.y > -3.16) return 100.;
         z.z = mod(z.z, 2.) - 1.;
     }
     vec3 offset = z;
     float dr = 1.;
+
     for (int n = 0; n < 9; ++n)
     {
         z.xy = mul(mat2(.54, .84, -.84, .54), z.xy);
 
-        z = clamp(z, -folding_limit, folding_limit) * 2.0 - z;
+        z = clamp(z, -params.z, params.z) * 2.0 - z;
 
         float r2 = dot(z, z);
-        if (r2 < min_radius2)
+        if (r2 < params.y)
         {
-            float temp = (fixed_radius2 / min_radius2);
+            float temp = (params.x / params.y);
             z *= temp;
             dr *= temp;
         }
-        else if (r2 < fixed_radius2)
+        else if (r2 < params.x)
         {
-            float temp = (fixed_radius2 / r2);
+            float temp = (params.x / r2);
             z *= temp;
             dr *= temp;
         }
 
-        z = scale * z + offset;
-        dr = dr * abs(scale) + 1.;
+        z = params.w * z + offset;
+        dr = dr * abs(params.w) + 1.;
     }
-    float r = length(z);
-    return r / abs(dr);
+    return length(z) / abs(dr);
 }
 
 
@@ -360,7 +351,7 @@ vec4 dPedals(vec3 p, float i, float id, float fid)
 
     if (i == 1.)
     {
-        p.z += abs(sin(p.x * 5.)) * .2;
+        p.z += abs(sin(p.x * 5.)) * .15;
         p.z += abs(sin((p.y - abs(p.x)) * 15.)) * .01;
         p.x += sin(p.z * 60.) * .01;
     }
@@ -429,9 +420,9 @@ vec2 map(vec3 p)
 
     vec2 r0 = tree((q - vec3(.2,.1,2)) * .37); r0.x /= .37;
 
-    vec2 r1 = flower(1.8*(q + vec3(4.5, 2., -7)), 0.); r1.x /= 1.8;
+    vec2 r1 = flower(1.8*(q + vec3(4.3, 1.8, -7)), 0.); r1.x /= 1.8;
     
-    vec2 r2 = flower(1.2 * (q + vec3(4.6, -.2, -3)), 1.); r2.x /= 1.2;
+    vec2 r2 = flower(1.2 * (q + vec3(4.5, -.2, -3)), 1.); r2.x /= 1.2;
 
     q = p + vec3(-35, 4.5, 16);
     q.y += HEIGHT(q.z);
@@ -441,13 +432,14 @@ vec2 map(vec3 p)
     r4.x = max(r4.x, -s0);
     //r4.x = min(r4.x, s0);
 
+
     p.xz = mul(rot(.1), p.xz);
+    p.x = -abs(p.x+11.) - 9.8;
     vec2 r6 = vec2(box(p + vec3(79,0,0), vec3(70, 1e5, 1e5)), MAT_FRACTAL);
 
-    if (p.z > 6.)p.y -= sin(p.z * .3 + 2.) * 2.;
-    else p.y -= sin(p.z * .1);
-
-    vec2 r5 = vec2(max(r6.x, mb((p * .1 - vec3(-3., 3.4+smoothstep(10.,-1.,p.z)*.4, 1.)), 2.) / .1), MAT_WALL);
+    if (p.z > 5.)p.y -= sin(p.z * .2 + 3.) * 2.;
+    else p.y -= (abs(fract(p.z * .04) - .5) * 4. - 1.)*.5;
+    vec2 r5 = vec2(max(r6.x, mb((p * .1 - vec3(-3., 3.4+smoothstep(10.,0.,p.z)*.4, 1.)), 2.) / .1), MAT_WALL);
 
     vec2 r = r0;
     if (r1.x < r.x) r = r1;
@@ -469,7 +461,7 @@ vec3 getMaterial(float id, vec3 p)
         vec3 col = fractalMate(p.xzy);
 
         col = mix(vec3(1.1, .1, 0), col, smoothstep(3.5, 4.9, p.y));
-        col = mix(vec3(.12, .3, .1), col, 1. - smoothstep(6., 25., p.y));
+        col = mix(vec3(.12, .3, .1), col, 1. - smoothstep(5., 25., p.y));
 
         return col;
     }
@@ -487,7 +479,7 @@ vec3 getMaterial(float id, vec3 p)
     }
     else if (id == MAT_FLOWER_LEAVES)
     {
-        return vec3(.1, .25, .1);
+        return mix(vec3(.1, .25, .1), vec3(.8),fbm(p.xy*5.)*.5);
     }
     else if (id == MAT_WALL)
     {
@@ -619,18 +611,17 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
 
         if (hit.y == MAT_TREE_LEAVES)
             direct += sunCol * max(0., dot(-n, sunDir)) * albedo * 0.3 *sha;
-        
+
         Lo += throughput * direct;
         //Lo = vec3(1.) * sha;
-       
+        float k = hit.y == MAT_TREE_TRUNK ? .2 : 1.;
         if (hit.y > MAT_FLOWER_LEAVES) break;// k = .1;
-
         // Sample brdf
         nextRd = normalize(getHemisphereSampleCosWeighted(n, hash21(seed++)));
         float pdf = max(0., dot(n, nextRd)) / PI;
         if (pdf < EPSILON) break;
 
-        throughput *= phongBrdf(nextRd, -rd, n, pos, albedo) * max(0., dot(nextRd, n)) / pdf;
+        throughput *= phongBrdf(nextRd, -rd, n, pos, albedo) * max(0., dot(nextRd, n)) / pdf * k;
                                   
         rd = nextRd;
         ro = pos + .002 * n;
