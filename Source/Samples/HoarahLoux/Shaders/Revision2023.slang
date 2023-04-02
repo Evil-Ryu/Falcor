@@ -267,9 +267,10 @@ float fractal(vec3 p)
 	for(int i=0; i < iter;i++)
 	{
         float a = 2.;
-        //if (i == 3 && q.x<-44.) a = 2.4;
+        if (i == 3 && q.x<-44.) a = 2.2;
 		p = a*clamp(p, -c, c) - p;
-		float k = max(1. / dot(p, p), 0.03);
+        float b = 1.;
+		float k = max(b / dot(p, p), 0.03);
 		p *= k;
 		scale *= k;
 	}
@@ -325,6 +326,224 @@ float smax(float a, float b, float k)
 {
     return smin(a, b, -k);
 }
+
+
+
+
+
+
+
+#define MTL_EYE 2.0
+#define MTL_CHEEK 3.0
+#define MTL_JAW 4.0
+#define MTL_HAIR 5.0
+#define MTL_ORBIT 6.0
+
+static float g_d;
+static float g_mtl_id;
+static vec3 g_eye_pos;
+static vec3 g_upper_lip_pos;
+static vec3 g_lower_lip_pos;
+static vec3 g_cheek_pos;
+
+
+void rp_rotate_y(inout vec3 p, float a)
+{
+    float c, s; vec3 q = p;
+    c = cos(a); s = sin(a);
+    p.x = c * q.x + s * q.z;
+    p.z = -s * q.x + c * q.z;
+}
+
+void rp_rotate_z(inout vec3 p, float a)
+{
+    float c, s; vec3 q = p;
+    c = cos(a); s = sin(a);
+    p.x = c * q.x - s * q.y;
+    p.y = s * q.x + c * q.y;
+}
+
+
+void rp_rotate_x(inout vec3 p, float a)
+{
+    float c, s; vec3 q = p;
+    c = cos(a); s = sin(a);
+    p.y = c * q.y - s * q.z;
+    p.z = s * q.y + c * q.z;
+}
+
+
+//-----------distance functions from iq----------------
+float sphere(vec3 p, float r)
+{
+    return length(p) - r;
+}
+
+float round_box(vec3 p, vec3 b, float r)
+{
+    return length(max(abs(p) - b, 0.0)) - r;
+}
+
+float torus(vec3 p, vec2 t)
+{
+    vec2 q = vec2(length(p.xz) - t.x, p.y);
+    return length(q) - t.y;
+}
+
+float tri_prism(vec3 p, vec2 h)
+{
+    vec3 q = abs(p);
+    return max(q.z - h.y, max(q.x * 0.866025 + p.y * 0.5, -p.y) - h.x * 0.5);
+}
+
+float capsule(vec3 p, vec3 a, vec3 b, float r)
+{
+    vec3 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h) - r;
+}
+//----------------------------------------------------------------------
+float hash(vec2 p)
+{
+    p = fract(p * vec2(5.3983, 5.4472));
+    p += dot(p.yx, p.xy + vec2(21.5351, 14.3137));
+    return fract(p.x * p.y * 95.4337);
+}
+
+
+
+float jaw(vec3 p, vec3 ds, float s)
+{
+    p.y += 1.73;
+    p.z -= 1.37;
+    rp_rotate_x(p, 0.3);
+    float d0 = round_box(p, vec3(s * sin((1.0 - p.y)), 0.4, 1.0) + ds, 0.1);
+    p.x = abs(p.x) - 0.18;
+    p.z -= 0.3;
+    p.y += 0.3;
+    float d1 = capsule(p, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.5, -0.23), 0.07);
+
+    return smin(d0, d1, 0.2);
+}
+
+float nose(vec3 p)
+{
+    p.y += 0.6;
+    p.z -= 1.25;
+    float d0 = round_box(p, vec3(0.01,
+        0.4,
+        atan((1.0 - p.y * 2.) * (1.0 - p.y * p.y * 2.)) * 0.45), 0.05);
+
+    p.z -= 0.3;
+    p.y += 0.4;
+    p.x = abs(p.x) - 0.02;
+    float d1 = capsule(p, vec3(0.0, 0.0, 0.0), vec3(0.3, 0.15, -0.4) * 0.4, 0.07);
+    return smin(d0 / 2., d1, 0.2);
+}
+
+float cheek(vec3 p)
+{
+    p.y += 0.7;
+    p.z -= 1.1;
+    p.x = abs(p.x) - 0.7;
+    float d0 = capsule(p + vec3(1.0, -0.15, 0.0), vec3(0.0, 0.0, -0.1), vec3(1.1, -0.1, 0.0), 0.35);
+    return d0;
+}
+
+float orbit(vec3 p)
+{
+    p.y += 0.16;
+    p.z -= 1.23;
+    p.x = abs(p.x) - 0.5;
+    rp_rotate_z(p, -0.2);
+    rp_rotate_y(p, -0.4);
+    float d0 = round_box(p, vec3(0.24, 0.04, 0.24), 0.13);
+
+    return d0;
+}
+
+float eye(vec3 p)
+{
+    p.y += 0.19;
+    p.z -= 0.9;
+    p.x = abs(p.x) - 0.47;
+    float d0 = sphere(p, 0.28);
+    return d0;
+}
+
+float brow_ridge(vec3 p)
+{
+    p.y += 0.2;
+    p.z -= 0.4;
+    p.x = abs(p.x) - 0.2;
+    rp_rotate_z(p, -0.3);
+    rp_rotate_x(p, 0.3);
+
+    float d0 = torus(p, vec2(0.83, 0.07));
+    return d0;
+}
+
+
+float head(vec3 p)
+{
+    vec3 tp = p;
+    rp_rotate_x(tp, 0.3);
+    tp.y -= 1.7;
+    tp.z -= 0.6;
+    float d0 = round_box(tp, vec3(0.87 * (0.3 * sin(tp.y) + 0.5),
+        0.6,
+        0.04 + (tp.y * 0.15 + 0.1)), 0.4);
+    tp = p;
+    tp.y -= 3.0;
+    tp.z += .599;
+    float d1 = sphere(tp, 1.0);
+    float d2 = brow_ridge(tp);
+    float d3 = orbit(tp);
+    float d4 = cheek(tp);
+    float d5 = nose(tp);
+    float d6 = jaw(tp, vec3(0.0), 0.4);
+
+    // movement of jaw
+    vec3 jp = tp + vec3(0.0,
+        0.015 * floor(2.0 * sin(46.0 * smoothstep(7.0, 12.0, mod(iGlobalTime, 12.0)))),
+        0.2);
+    float d7 = jaw(jp, vec3(-0.01, -0.1, -0.9), 0.3);
+    float d8 = eye(tp) + 0.05;
+    float d10 = sphere(p + vec3(0.0, -2.2, 2.2), 2.25);
+
+    float d = smin(d1, d0, 0.5);
+    d = smin(d, d2, 0.3);
+    if (d4 < d) { g_mtl_id = MTL_CHEEK; g_cheek_pos = p; }
+    d = smin(d, d4,.2);
+    d = smax(d, -d3, .2);
+    d = smax(d, -d6, .2);
+    if (d7 < d) { d = d7; g_mtl_id = MTL_JAW; g_lower_lip_pos = jp; }
+    d = max(d, -d10);
+    //d -= texture(iChannel0, tp.xy * 0.1 - vec2(0.3, 0.3)).y * 0.025;
+    if (d5 < d) { g_mtl_id = 1.0; }
+    d = smin(d, d5, 0.2);
+
+    if (d8 < d) { g_mtl_id = MTL_EYE; g_eye_pos = p; }
+    d = smin(d, d8, .01);
+    g_upper_lip_pos = p;
+
+    d += fbm(p * 10.) * 0.03;
+    return d;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 vec2 fold(vec2 p, float s, out float id)
 {
@@ -587,10 +806,12 @@ vec2 map(vec3 p)
     //r4.x = min(r4.x, s0);
     r4.x = max(r4.x, -s0);
 
-    if (p.z < -79.) r4.x = 10000.;
-    if (p.z > 45.) r4.x = 10000.;
-    if (p.y > 80.) r4.x = 10000.;
+    //if (p.z < -79.) r4.x = 10000.;
+    //if (p.z > 45.) r4.x = 10000.;
+    //if (p.y > 80.) r4.x = 10000.;
     // end skybox
+
+    vec2 r7 = vec2(head((p-vec3(0,-20,-108)) * .05) / .05, MAT_WALL);
 
 
 
@@ -611,6 +832,8 @@ vec2 map(vec3 p)
     //if (r1.x < r.x) r = r1;
     //if (r2.x < r.x) r = r2;
     if (r4.x < r.x) r = r4;
+    if (r7.x < r.x) r = r7;
+
     //if (r5.x < r.x) r = r5;
 
     return r;
@@ -675,14 +898,14 @@ vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
             hit = true;
             break;
         }
-        if (t > FAR + (1. - haha) * 100.)
+        if (t > FAR)
         {
             break;
         }
         
         t += res.x;
     }
-    if (!hit) t = -1.;
+    //if (!hit) t = -1.;
 
     return vec2(t, res.y);
 }
@@ -741,9 +964,10 @@ vec4 sampleLight(vec3 pos, vec3 V, vec3 n, Material mate)
     col = (sunCol * phongBrdf(sunDir, V, n, pos, mate) * max(0., dot(n, sunDir)) * sha) / lightSelectPdf;
 
     // begin skybox
-#if 0
+#if 1
     float occ = ao(pos, n);
     col *= 2;
+    //occ = smoothstep(.1, .8, occ);
     vec3 skycol = vec3(0., .5, 1.) * .003;
     col += .1 * (sunCol * phongBrdf(-sunDir, V, n, pos, mate) * max(0., dot(n, -sunDir))) / lightSelectPdf;
     col += max(0., n.y) * skycol * 1.;
@@ -858,6 +1082,80 @@ vec3 background(vec3 ro, vec3 rd)
     return mix(vec3(.9, .9, 1.)*.1, skyCol, d);
 }
 
+
+float noise(vec3 p)
+{
+    const vec3 s = vec3(7, 157, 113);
+    vec3 ip = floor(p);
+    vec4 h = vec4(0., s.yz, s.y + s.z) + dot(ip, s);
+    p -= ip;
+    p = p * p * (3. - 2. * p);
+    h = mix(fract(sin(h) * 43758.5453), fract(sin(h + s.x) * 43758.5453), p.x);
+    h.xy = mix(h.xz, h.yw, p.y);
+    return mix(h.x, h.y, p.z);
+}
+
+float fbm(vec3 p)
+{
+    mat3 m = mat3(.0, .8, .6,
+        -.8, .36, -.48,
+        -.6, -.48, .64);
+    float f = 0., s = .5;
+    for (int i = 0; i < 4; ++i)
+    {
+        f += s * noise(p);
+        p = mul(p, m) * 2.01;
+        s *= .5;
+    }
+
+    return f;
+}
+
+
+float mapCloud(vec3 p)
+{
+    p *= .5;
+    return smoothstep(.0, .8, fbm(p * vec3(1, 1, .2)) + .5 * fbm(p * vec3(2.5,2.5,1.)));
+}
+
+vec3 renderCloud(vec3 ro, vec3 rd, vec2 uv)
+{
+    vec4 sum = vec4(0, .125, .25, 1);
+    sum.xyz *= .25;
+   // float t = (300.0 - ro.y) / rd.y;
+    //if (t < 0.) return sum.xyz;
+    float t = 10.;
+    float dt = .2;
+
+
+    float rnd = .95 + .05 * hash21(seed++).x;
+
+    for (int i = 0; i < 128; ++i)
+    {
+        vec3 p = ro + t * rd;
+        float d = mapCloud(p) * rnd;
+
+        if (d > 0.)
+        {
+            float s = 0.;
+            vec3 st = normalize(p + sunDir);
+            vec3 sp = p;
+            for (int j = 0; j < 20; j++)
+                s += mapCloud(sp += st);
+
+            sum.xyz += exp(-s * .015) * d * vec3(1.5) * sunCol * (1. - d) * sum.a;
+            sum.a *= 1. - d;
+        }
+
+        if (sum.a < .05 || t > 1000.) break;
+
+        t += dt;
+        dt = max(1., .05 * t);
+    }
+    return sum.xyz;
+}
+
+
 vec3 scene(vec3 ro, vec3 rd, vec2 uv)
 {
     vec2 hit = intersect(ro, rd, FAR);
@@ -867,14 +1165,19 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
     vec3 throughput = vec3(1.);
 
     vec3 Lo = vec3(0);
-    vec3 skycol = vec3(0., .5, 1.) * .003;
+
+    vec3 cloud = renderCloud(ro, rd, uv);
+    vec3 skycol = cloud;// *vec3(.585, .014, .0015);;
+
+    //return sky;
 
     // bounces
     for (int i = 0; i < MAX_BOUNCES; ++i)
     {
         vec3 pos = ro + hit.x * rd;
 
-        if (hit.x < 0.)
+        //if (hit.x < 0.)
+        if(hit.x >= FAR)
         {
             // indirect part
             // it has to finally hit a light or the sky to have color
@@ -942,7 +1245,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
         ro = nextRo;
     }
 
-    Lo = mix(Lo, skycol, (1. - exp(-.00005 * t * t)));
+    Lo = mix(Lo, skycol, (1. - exp(-.0001 * t * t)));
     //Lo = mix(Lo, vec3(0., .5, 1.) * .003, smoothstep(8.,2.,4.*(length(uv*vec2(1.,2) + vec2(1.3, -2)))));
 
     return Lo;
