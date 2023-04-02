@@ -70,40 +70,45 @@ vec2 hash21(float p)
     return fract(vec2(p2.x * p2.y * 95.4337, p2.x * p2.y * 97.597));
 }
 
-float noise(vec2 x)
+float noise(vec3 p)
 {
-    vec2 p = floor(x);
-    vec2 f = fract(x);
-    f = f * f * (3. - 2. * f);
-    float n = p.x + p.y * 57.;
-    return mix(mix(hash21(n).x, hash21(n + 1.).x, f.x),
-        mix(hash21(n + 57.).x, hash21(n + 58.).x, f.x), f.y);
+    const vec3 s = vec3(7, 157, 113);
+    vec3 ip = floor(p);
+    vec4 h = vec4(0., s.yz, s.y + s.z) + dot(ip, s);
+    p -= ip;
+    p = p * p * (3. - 2. * p);
+    h = mix(fract(sin(h) * 43758.5453), fract(sin(h + s.x) * 43758.5453), p.x);
+    h.xy = mix(h.xz, h.yw, p.y);
+    return mix(h.x, h.y, p.z);
 }
 
-float fbm(vec2 p)
+float fbm(vec3 p)
 {
-    float f = 0.;
-    f += .5 * noise(p);
-    p = p * 2.01;
-    f += .25 * noise(p);
-    p = p * 2.02;
-    f += .125 * noise(p);
-    p = p * 2.03;
+    mat3 m = mat3(.0, .8, .6,
+        -.8, .36, -.48,
+        -.6, -.48, .64);
+    float f = 0., s = .5;
+    for (int i = 0; i < 4; ++i)
+    {
+        f += s * noise(p);
+        p = mul(p, m) * 2.01;
+        s *= .5;
+    }
+
     return f;
 }
 
-float bump(vec3 p, vec3 n)
+float bump(vec3 p)
 {
-    p *= vec3(.1,.025, .1) * iResolution.x;
-    return (fbm(p.xy) * abs(n.z) + noise(p.xz) * abs(n.y) + noise(p.yz) * abs(n.x)) / 3.;
+    return fbm(p * vec3(.1, .025, .1) * iResolution.x);
 }
 
 vec3 bump_mapping(vec3 p, vec3 n, float weight)
 {
     vec2 e = vec2(2. / iResolution.y, 0);
-    vec3 g = vec3(bump(p - e.xyy, n) - bump(p + e.xyy, n),
-        bump(p - e.yxy, n) - bump(p + e.yxy, n),
-        bump(p - e.yyx, n) - bump(p + e.yyx, n)) / (e.x * 2.);
+    vec3 g = vec3(bump(p - e.xyy) - bump(p + e.xyy),
+        bump(p - e.yxy) - bump(p + e.yxy),
+        bump(p - e.yyx) - bump(p + e.yyx)) / (e.x * 2.);
     g = (g - n * dot(g, n));
     return normalize(n + g * weight);
 }
@@ -119,7 +124,6 @@ float smin(float a, float b, float k)
     return mix(b, a, h) - k * h * (1. - h);
 
 }
-
 
 float mb(vec3 z, float y)
 {
@@ -219,7 +223,7 @@ vec2 fold(vec2 p, float s, out float id)
     float n = PI * 2. / s;
     a = floor(a / n);
     id = mod(a, s);
-    p = mul(p, rot(a * n));
+    p = mul(rot(-a * n), p);
     return p;
 }
 
@@ -245,6 +249,7 @@ vec4 dBranches(vec3 p, float i, float id, float len)
         l = 3.;
     }
     else if (i > 0.) k *= 0.2;
+    else k -= noise(p*vec3(50,10,50))*.02 - .01;
 
     float dcap = dbar2(p + vec3(0, 0, len),
         vec3(0, 0, len),
@@ -261,8 +266,8 @@ vec2 tree(vec3 z0)
     vec4 z = vec4(z0, 1.);
     vec3 p = z.xyz;
 
-    p.x -= sin(p.y * 2.) * .2;
-    float d = max(abs(p.y - .1) - 1., length(p.xz) - .23 + smoothstep(0., 1.3, p.y) * .3);
+    p.x -= sin(p.y * 2.) * .1;
+    float d = max(abs(p.y - .1) - 1., length(p.xz) - .22 - noise(p.zyx * vec3(50, 10, 50)) * .02 + smoothstep(0., 1.3, p.y) * .3);
 
     float id = 0., numLayers = 7., mateid = MAT_TREE_TRUNK;
 
@@ -288,7 +293,7 @@ vec2 tree(vec3 z0)
 
 
             z.xz = fold(z.xz, f, id);
-            z.yz = mul(z.yz, rot(spread));
+            z.yz = mul(rot(-spread), z.yz);
 
 
             float len = 1. + id / f / 3.;
@@ -418,7 +423,7 @@ vec2 map(vec3 p)
 
     vec3 q = p - vec3(.87, 3., 1.82);
 
-    vec2 r0 = tree((q - vec3(.2,.1,2)) * .37); r0.x /= .37;
+    vec2 r0 = tree((q - vec3(.3,.1,2)) * .37); r0.x /= .37;
 
     vec2 r1 = flower(1.8*(q + vec3(4.3, 1.8, -7)), 0.); r1.x /= 1.8;
     
@@ -438,8 +443,8 @@ vec2 map(vec3 p)
     vec2 r6 = vec2(box(p + vec3(79,0,0), vec3(70, 1e5, 1e5)), MAT_FRACTAL);
 
     if (p.z > 5.)p.y -= sin(p.z * .2 + 3.) * 2.;
-    else p.y -= (abs(fract(p.z * .04) - .5) * 4. - 1.)*.5;
-    vec2 r5 = vec2(max(r6.x, mb((p * .1 - vec3(-3., 3.4+smoothstep(10.,0.,p.z)*.4, 1.)), 2.) / .1), MAT_WALL);
+    else p.y -= (abs(fract(p.z * .037) - .5) * 4. - 1.)*.5;
+    vec2 r5 = vec2(max(r6.x, mb((p * .1 - vec3(-3., 3.5+smoothstep(10.,0.,p.z)*.3, 1.)), 2.) / .1), MAT_WALL);
 
     vec2 r = r0;
     if (r1.x < r.x) r = r1;
@@ -467,7 +472,7 @@ vec3 getMaterial(float id, vec3 p)
     }
     else if (id == MAT_TREE_TRUNK)
     {
-        return vec3(.561, .459, .357) * .5;
+        return  vec3(.169, .114, .081)*2.;
     }
     else if (id == MAT_TREE_LEAVES)
     {
@@ -479,7 +484,8 @@ vec3 getMaterial(float id, vec3 p)
     }
     else if (id == MAT_FLOWER_LEAVES)
     {
-        return mix(vec3(.1, .25, .1), vec3(.8),fbm(p.xy*5.)*.5);
+        //return mix(vec3(.1, .25, .1), vec3(.8), fbm(p.xy * 5.) * .5);
+        return mix(vec3(.1, .25, .1), vec3(.8),fbm(p*5.)*.5);
     }
     else if (id == MAT_WALL)
     {
@@ -519,7 +525,7 @@ static vec3 sunDir = normalize(vec3(-.7, 1, -.1));
 static vec3 sunCol = vec3(1.);
 
 
-vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
+vec2 intersect(vec3 ro, vec3 rd)
 {
     float rnd = .9 + .1 * hash21(seed++).x;
     float t = .01;
@@ -529,7 +535,7 @@ vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
     for(int i = 0; i < MARCHING_STEPS; ++i)
     {
         res = map(ro + t * rd);
-        res.x = abs(res.x) * rnd * MARCHING_STEP_SCALE;
+        res.x = abs(res.x) *rnd* MARCHING_STEP_SCALE;
         float k = res.y == MAT_WALL ? 10. : 1.;
         if (res.x < .0005 * k + .0002 * t)
         {
@@ -567,24 +573,75 @@ vec3 getHemisphereSampleCosWeighted(vec3 n, vec2 s)
 }
 
 
+
+
+
+float mapCloud(vec3 p)
+{
+    p *= .01;
+    return smoothstep(.1, 1., fbm(p * vec3(.5, 1, 1)) + .5 * fbm(p * 2.5));
+}
+
+vec3 renderCloud(vec3 ro, vec3 rd, vec2 uv)
+{
+    vec3 skycol = vec3(.053, .001, .0001);
+    skycol = mix(skycol, vec3(0), smoothstep(.1, 1., fbm(vec3(uv * vec2(12, 60), 1))));
+
+    vec4 sum = vec4(0, 0, 0, 1);
+
+    float t = (100.0 - ro.y) / rd.y, dt = .2;
+
+    if (t < 0.) return skycol;
+
+    float rnd = .95 + .05 * hash21(seed++).x;
+
+    for (int i = 0; i < 64; ++i)
+    {
+        vec3 p = ro + t * rd;
+        float d = mapCloud(p) * rnd;
+
+        if (d > 0.)
+        {
+            float s = 0.;
+            vec3 st = normalize(p + sunDir);
+            vec3 sp = p;
+            for (int j = 0; j < 10; j++)
+                s += mapCloud(sp += st);
+
+            sum.xyz += exp(-s * .1) * d * vec3(1.5) * sunCol * (1. - d) * sum.a;
+            sum.a *= 1. - d;
+        }
+
+        if (sum.a < .1 || t > 1000.) break;
+
+        t += dt;
+        dt = max(1., .1 * t);
+    }
+    sum.xyz = mix(sum.xyz, skycol, smoothstep(0., 3., t / 800.));
+    return sum.xyz;
+}
+
 vec3 scene(vec3 ro, vec3 rd, vec2 uv)
 {
     vec3 throughput = vec3(1.), Lo = vec3(0), pos, q, n, albedo, nextRd, direct;
 
-    float f = smoothstep(.1, 1.2, fbm(uv * vec2(4., 10.)));
-    vec3 skycol = vec3(.765, .118, .039);
-    skycol = mix(vec3(0), mix(skycol*skycol, vec3(0.), (1. - f * f) * smoothstep(-1., .8, uv.y)), smoothstep(0., 2., uv.y));
-    //return skycol;
+    vec3 cloud = renderCloud(ro, rd, uv);
+    vec3 sky = cloud * vec3(.585, .014, .0015);;
+    sky = mix(sky, vec3(1, .2, 0), smoothstep(.1,1.,dot(cloud,cloud)));
+
+    sky = mix(vec3(0,.5,1) * .0005, sky, smoothstep(0.,1.,length((uv-vec2(.3,.4))*vec2(.5,1))-.1));
+
+    //return sky;
     // 
     // bounces
     for (int i = 0; i < MAX_BOUNCES; ++i)
     {
-        vec2 hit = intersect(ro, rd, FAR);
+        vec2 hit = intersect(ro, rd);
         q = pos = ro + hit.x * rd;
 
         if (hit.x < 0.)
         {
-            Lo = Lo + throughput * skycol;
+            Lo = Lo + throughput * sky;
             break;
         }
 
@@ -595,7 +652,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
         q.y -= HEIGHT(q.z);
 
         float a = 0., b = 0.;
-        if (hit.y == MAT_TREE_TRUNK) a = .2, b = 200.;
+        if (hit.y == MAT_TREE_TRUNK) a = .2, b = 30.;
         if (q.y <= .05) a = .5, b = 100.;
         if(a > 0.)
             n = bump_mapping(q * a, n, b / max(iResolution.x, iResolution.y));
@@ -613,15 +670,15 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
             direct += sunCol * max(0., dot(-n, sunDir)) * albedo * 0.3 *sha;
 
         Lo += throughput * direct;
-        //Lo = vec3(1.) * sha;
-        float k = hit.y == MAT_TREE_TRUNK ? .2 : 1.;
-        if (hit.y > MAT_FLOWER_LEAVES) break;// k = .1;
+
+        if (hit.y > MAT_FLOWER) break;
+
         // Sample brdf
         nextRd = normalize(getHemisphereSampleCosWeighted(n, hash21(seed++)));
         float pdf = max(0., dot(n, nextRd)) / PI;
         if (pdf < EPSILON) break;
 
-        throughput *= phongBrdf(nextRd, -rd, n, pos, albedo) * max(0., dot(nextRd, n)) / pdf * k;
+        throughput *= phongBrdf(nextRd, -rd, n, pos, albedo) * max(0., dot(nextRd, n)) / pdf * (hit.y == MAT_TREE_TRUNK ? .2 : 1.);
                                   
         rd = nextRd;
         ro = pos + .002 * n;
@@ -670,7 +727,6 @@ vec4 mainImage(vec2 fragCoord)
     vec3 up = normalize(cross(right, forward));
 
     vec3 rd = normalize(p.x * right + p.y * up + 1.8 * forward);
-
 
     vec3 finalCol = scene(ro, rd, p);
     float k = 1.;

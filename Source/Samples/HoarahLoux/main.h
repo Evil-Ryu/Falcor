@@ -55,6 +55,7 @@ private:
     float mFrame = 0.f;
 
     float mMaxSPP = 1024;
+    int mSppAccumulated = 0;
 
 
 

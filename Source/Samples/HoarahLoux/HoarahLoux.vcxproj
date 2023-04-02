@@ -21,6 +21,9 @@
       <Project>{2c535635-e4c5-4098-a928-574f0e7cd5f9}</Project>
     </ProjectReference>
   </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="Shaders\ColorShiftPost.slang" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{F041EF57-B330-4E03-96A9-95F97D892357}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>

@@ -314,7 +314,9 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
     mCameraDirty = mpCamCtrl->update();
 
     mAccumulationRestart = mAccumulationRestart || (mPrevCameraDirty && !mCameraDirty);
-    
+
+    if (mAccumulationRestart) mSppAccumulated = 0;
+
     mPrevCameraDirty = mCameraDirty;
 
     executeClearPass(pRenderContext, pTargetFbo);
@@ -346,6 +348,7 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
     executeBlitPass(pRenderContext, passOutput, pTargetFbo, width, height);
 
     mAccumulationRestart = false;
+    mSppAccumulated++;
 }
 
 
@@ -429,6 +432,9 @@ void ShaderEditor::onGuiRender(Gui* pGui)
         mFrame = 0.f;
     }
     w.slider("iGlobalTime", mTime, 0.f, 180.f);
+
+    std::string numSppStr = "SPP Accumulated: " + std::to_string(mSppAccumulated);
+    w.text(numSppStr, false);
 
     w.slider("var0", mControllableVars[0], -1.f, 1.f);
     w.slider("var1", mControllableVars[1], -1.f, 1.f);
