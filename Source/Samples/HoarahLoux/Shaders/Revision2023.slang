@@ -310,6 +310,13 @@ vec3 fractalMate(vec3 p)
 
 }
 
+
+float sabs(float x, float k)
+{
+    return sqrt(x * x + k) - 0.1;
+}
+
+
 mat2 rot(float r)
 {
     return mat2(cos(r), sin(r), -sin(r), cos(r));
@@ -414,16 +421,16 @@ float hash(vec2 p)
 
 float jaw(vec3 p, vec3 ds, float s)
 {
-    p.y += 1.73;
-    p.z -= 1.37;
-    rp_rotate_x(p, 0.3);
-    float d0 = round_box(p, vec3(s * sin((1.0 - p.y)), 0.4, 1.0) + ds, 0.1);
-    p.x = abs(p.x) - 0.18;
-    p.z -= 0.3;
+    p.y += 1.2;
+    p.z -= 1.3;
+    //rp_rotate_x(p, 0.2);
+    float d0 = round_box(p, vec3(s * sin((1.0 - p.y)), 0.2 , 1.) + ds, 0.1);
+    p.y = abs(p.y) - 0.18;
+    p.z -= 0.2;
     p.y += 0.3;
-    float d1 = capsule(p, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.5, -0.23), 0.07);
+    float d1 = capsule(p, vec3(0.0, 0.0, 0.0), vec3(0.5, 0.0, 0.), 0.1);
 
-    return smin(d0, d1, 0.2);
+    return d0;// smin(d0, d1, 0.2);
 }
 
 float nose(vec3 p)
@@ -432,7 +439,7 @@ float nose(vec3 p)
     p.z -= 1.25;
     float d0 = round_box(p, vec3(0.01,
         0.4,
-        atan((1.0 - p.y * 2.) * (1.0 - p.y * p.y * 2.)) * 0.45), 0.05);
+        atan((1.0 - p.y * 2.) * (1.0 - p.y * p.y * 2.)) * 0.45), 0.1);
 
     p.z -= 0.3;
     p.y += 0.4;
@@ -446,7 +453,7 @@ float cheek(vec3 p)
     p.y += 0.7;
     p.z -= 1.1;
     p.x = abs(p.x) - 0.7;
-    float d0 = capsule(p + vec3(1.0, -0.15, 0.0), vec3(0.0, 0.0, -0.1), vec3(1.1, -0.1, 0.0), 0.35);
+    float d0 = capsule(p + vec3(1.0, -0.15, 0.0), vec3(0.0, 0.0, -0.1), vec3(.9, -0.1, -.1), 0.35);
     return d0;
 }
 
@@ -457,7 +464,7 @@ float orbit(vec3 p)
     p.x = abs(p.x) - 0.5;
     rp_rotate_z(p, -0.2);
     rp_rotate_y(p, -0.4);
-    float d0 = round_box(p, vec3(0.24, 0.04, 0.24), 0.13);
+    float d0 = round_box(p, vec3(0.24, 0.04, 0.24), 0.01);
 
     return d0;
 }
@@ -474,12 +481,12 @@ float eye(vec3 p)
 float brow_ridge(vec3 p)
 {
     p.y += 0.2;
-    p.z -= 0.4;
-    p.x = abs(p.x) - 0.2;
+    p.z -= 0.3;
+    p.x = abs(p.x) - 0.1;
     rp_rotate_z(p, -0.3);
     rp_rotate_x(p, 0.3);
 
-    float d0 = torus(p, vec2(0.83, 0.07));
+    float d0 = torus(p, vec2(0.83, 0.1));
     return d0;
 }
 
@@ -505,7 +512,7 @@ float head(vec3 p)
 
     // movement of jaw
     vec3 jp = tp + vec3(0.0,
-        0.015 * floor(2.0 * sin(46.0 * smoothstep(7.0, 12.0, mod(iGlobalTime, 12.0)))),
+        0.015 * floor(2.0 * sin(46.0 * smoothstep(7.0, 12.0, mod(0., 12.0)))),
         0.2);
     float d7 = jaw(jp, vec3(-0.01, -0.1, -0.9), 0.3);
     float d8 = eye(tp) + 0.05;
@@ -515,8 +522,8 @@ float head(vec3 p)
     d = smin(d, d2, 0.3);
     if (d4 < d) { g_mtl_id = MTL_CHEEK; g_cheek_pos = p; }
     d = smin(d, d4,.2);
-    d = smax(d, -d3, .2);
-    d = smax(d, -d6, .2);
+    d = smax(d, -d3, .1);
+    //d = smax(d, -d6, .2);
     if (d7 < d) { d = d7; g_mtl_id = MTL_JAW; g_lower_lip_pos = jp; }
     d = max(d, -d10);
     //d -= texture(iChannel0, tp.xy * 0.1 - vec2(0.3, 0.3)).y * 0.025;
@@ -524,7 +531,7 @@ float head(vec3 p)
     d = smin(d, d5, 0.2);
 
     if (d8 < d) { g_mtl_id = MTL_EYE; g_eye_pos = p; }
-    d = smin(d, d8, .01);
+    d = min(d, d8);
     g_upper_lip_pos = p;
 
     d += fbm(p * 10.) * 0.03;
@@ -831,7 +838,7 @@ vec2 map(vec3 p)
     vec2 r = r4;
     //if (r1.x < r.x) r = r1;
     //if (r2.x < r.x) r = r2;
-    if (r4.x < r.x) r = r4;
+    //if (r4.x < r.x) r = r4;
     if (r7.x < r.x) r = r7;
 
     //if (r5.x < r.x) r = r5;
@@ -876,9 +883,10 @@ float ao(vec3 p, vec3 n)
 }
 
 //static vec3 sunDir = normalize(vec3(-.5, 1., -.2));
-static vec3 sunDir = normalize(vec3(-1,.5,1));
+static vec3 sunDir = normalize(vec3(-1, .5, 1));
+//static vec3 sunDir = normalize(vec3(-1,1,1));
 //static vec3 sunCol = vec3(253., 184., 19.) / 256.;
-static vec3 sunCol = vec3(1.);
+static vec3 sunCol = vec3(1);
 
 
 vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
@@ -1166,7 +1174,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
 
     vec3 Lo = vec3(0);
 
-    vec3 cloud = renderCloud(ro, rd, uv);
+    vec3 cloud = vec3(0);// renderCloud(ro, rd, uv);
     vec3 skycol = cloud;// *vec3(.585, .014, .0015);;
 
     //return sky;
@@ -1258,7 +1266,7 @@ vec4 mainImage(vec2 fragCoord)
     {
         MAX_BOUNCES = 1;//  iCameraDirty > 0. ? 3 : 3;
         MARCHING_STEPS = 128;// iCameraDirty > 0. ? 128 : 1024;
-        MARCHING_STEP_SCALE = 5.;// iCameraDirty > 0. ? 5. : 1.;
+        MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
 
         // only update 1 out of 4 pixels when moving camera
         if (any( (uint2(fragCoord) ) % 2 != 0))
