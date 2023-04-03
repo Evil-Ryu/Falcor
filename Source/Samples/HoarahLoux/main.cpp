@@ -47,11 +47,14 @@ void ShaderEditor::resetCamera()
 {
     auto camera = mCameras[0];
    
-    camera->setPosition(float3(-1.32, 2.18, 28.26));
-    camera->setTarget(float3(-1.5, 2.3, 27.3));
+    //camera->setPosition(float3(-1.32, 2.18, 28.26));
+    //camera->setTarget(float3(-1.5, 2.3, 27.3));
     // for skybox
-    /*camera->setPosition(float3(6.64, 10., -1.79));
-    camera->setTarget(float3(6.53, 10.,-2.8));*/
+    camera->setPosition(float3(6.64, 15., -1.79));
+    camera->setTarget(float3(6.53, 15.,-2.8));
+
+    //camera->setPosition(float3(7.33, 14.93, -1.91));
+    //camera->setTarget(float3(7.23, 15.02, -2.9));
     camera->setUpVector(float3(0, 1, 0));
 
     {

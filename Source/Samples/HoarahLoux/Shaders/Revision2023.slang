@@ -28,7 +28,7 @@ static int MARCHING_STEPS = 128;// iCameraDirty > 0. ? 128 : 1024;
 static float MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
 
 #define PATHTRACER 1
-#define FAR 1000.
+#define FAR 530.
 //#define MAX_BOUNCES 3
 #define INTER_THRESHOLD .001
 #define EPSILON 			0.0001
@@ -175,7 +175,7 @@ Material getMaterial(float id, vec3 p)
     }
     else if (id == MAT_WALL)
     {
-        mate.albedo = vec3(0.690, 0.565, 0.451);
+        mate.albedo = vec3(0.690, 0.565, 0.451)*.7;
     }
     return mate;
 }
@@ -303,11 +303,10 @@ vec3 fractalMate(vec3 p)
         //acc += length(p0.xz - p.xz);
     }
 
-    return vec3(.4, .5, .25) + vec3(.25, .2, .1) * cos(6.28*(vec3(.4)*acc3));
+    vec3 res = vec3(.4, .5, .25) + vec3(.25, .2, .1) * cos(6.28*(vec3(.4)*acc3));
     //vec3 k = vec3(.3, .2, .2);
-    //if (q.z < 4.8) k = vec3(.5, .4, .2);
-    //return vec3(.4, .4, .3) + k * cos(6. * (vec3(.5) * acc3));
-
+   
+    return res;
 }
 
 
@@ -418,7 +417,7 @@ float hash(vec2 p)
 }
 
 
-
+#if 0
 float jaw(vec3 p, vec3 ds, float s)
 {
     p.y += 1.2;
@@ -432,14 +431,59 @@ float jaw(vec3 p, vec3 ds, float s)
 
     return d0;// smin(d0, d1, 0.2);
 }
+#else
 
+float triPrism(vec3 p, vec2 h)
+{
+    const float k = sqrt(3.0);
+    h.x *= 0.5 * k;
+    p.xy /= h.x;
+    p.x = abs(p.x) - 1.0;
+    p.y = p.y + 1.0 / k;
+    if (p.x + k * p.y > 0.0) p.xy = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+    p.x -= clamp(p.x, -2.0, 0.0);
+    float d1 = length(p.xy) * sign(-p.y) * h.x;
+    float d2 = abs(p.z) - h.y;
+    return length(max(vec2(d1, d2), 0.0)) + min(max(d1, d2), 0.);
+}
+
+float ellipsoid(in vec3 p, in vec3 r) // approximated
+{
+    float k0 = length(p / r);
+    float k1 = length(p / (r * r));
+    return k0 * (k0 - 1.0) / k1;
+}
+
+
+float jaw(vec3 p, vec3 ds, float s)
+{
+    vec3 q = p;
+    p.x = abs(p.x) - .25;
+    p.xy = mul(rot(-.1), p.xy);
+
+    p.y += 1.2; 
+    p.z -= 1.4;
+    float d0 = triPrism(p*vec3(.18,1,1), vec2(.1, .1));
+
+
+    p = q;
+    p.y += 1.3;
+    p.z -= 1.4;
+    float d1 = ellipsoid(p, vec3(.4,.1,.1));
+    float d = min(d0, d1);
+    return d;
+}
+
+#endif
 float nose(vec3 p)
 {
-    p.y += 0.6;
+    p.y += 0.5;
     p.z -= 1.25;
-    float d0 = round_box(p, vec3(0.01,
-        0.4,
-        atan((1.0 - p.y * 2.) * (1.0 - p.y * p.y * 2.)) * 0.45), 0.1);
+    float d0 = round_box(p,
+        vec3(0.01,
+             0.3,
+             atan((1.0 - p.y * 2.) * (1.0 - p.y * p.y * 2.)) * 0.45),
+        0.1);
 
     p.z -= 0.3;
     p.y += 0.4;
@@ -491,7 +535,7 @@ float brow_ridge(vec3 p)
 }
 
 
-float head(vec3 p)
+float head(vec3 p, float id)
 {
     vec3 tp = p;
     rp_rotate_x(tp, 0.3);
@@ -524,14 +568,20 @@ float head(vec3 p)
     d = smin(d, d4,.2);
     d = smax(d, -d3, .1);
     //d = smax(d, -d6, .2);
-    if (d7 < d) { d = d7; g_mtl_id = MTL_JAW; g_lower_lip_pos = jp; }
+    if (d7 < d) {g_mtl_id = MTL_JAW; g_lower_lip_pos = jp; }
+    d = smin(d, d7, .05);
+
     d = max(d, -d10);
     //d -= texture(iChannel0, tp.xy * 0.1 - vec2(0.3, 0.3)).y * 0.025;
     if (d5 < d) { g_mtl_id = 1.0; }
     d = smin(d, d5, 0.2);
 
-    if (d8 < d) { g_mtl_id = MTL_EYE; g_eye_pos = p; }
-    d = min(d, d8);
+    if (id < 2.)
+    {
+        if (d8 < d) { g_mtl_id = MTL_EYE; g_eye_pos = p; }
+        d = min(d, d8);
+    }
+    
     g_upper_lip_pos = p;
 
     d += fbm(p * 10.) * 0.03;
@@ -815,10 +865,28 @@ vec2 map(vec3 p)
 
     //if (p.z < -79.) r4.x = 10000.;
     //if (p.z > 45.) r4.x = 10000.;
-    //if (p.y > 80.) r4.x = 10000.;
+    if (p.y > 70.) r4.x = 10000.;
     // end skybox
 
-    vec2 r7 = vec2(head((p-vec3(0,-20,-108)) * .05) / .05, MAT_WALL);
+    /*q = p;
+    q.yz = mul(rot(1.), q.yz);
+    vec2 r7 = vec2(head((q-vec3(0,-310,-220.)) * .01, 0.) / .01, MAT_WALL);*/
+
+    vec2 r7 = vec2(head((p - vec3(0, -20, -108)) * .05, 0.) / .05, MAT_WALL); 
+
+    q = p;
+    q.xz = q.zx;
+    q.yz = mul(rot(-.3), q.yz);
+    vec2 r8 = vec2(head((q - vec3(-10, -12, -18)) * .1, 1.) / .1, MAT_WALL);
+
+
+    q = p;
+    q.xz = mul(rot(3.15), q.xz);
+    q.xz = q.zx;
+    q.xy = mul(rot(.5), q.xy);
+    q.yz = mul(rot(-.2), q.yz);
+    vec2 r9 = vec2(head((q - vec3(10, -13, -28)) * .15, 2.) / .15, MAT_WALL);
+
 
 
 
@@ -840,6 +908,8 @@ vec2 map(vec3 p)
     //if (r2.x < r.x) r = r2;
     //if (r4.x < r.x) r = r4;
     if (r7.x < r.x) r = r7;
+    if (r8.x < r.x) r = r8;
+    if (r9.x < r.x) r = r9;
 
     //if (r5.x < r.x) r = r5;
 
@@ -884,9 +954,9 @@ float ao(vec3 p, vec3 n)
 
 //static vec3 sunDir = normalize(vec3(-.5, 1., -.2));
 static vec3 sunDir = normalize(vec3(-1, .5, 1));
-//static vec3 sunDir = normalize(vec3(-1,1,1));
+//static vec3 sunDir = normalize(vec3(1,1,0));
 //static vec3 sunCol = vec3(253., 184., 19.) / 256.;
-static vec3 sunCol = vec3(1);
+static vec3 sunCol = vec3(1.,.8,.3);
 
 
 vec2 intersect(vec3 ro, vec3 rd, vec2 uv)
@@ -1123,13 +1193,13 @@ float fbm(vec3 p)
 float mapCloud(vec3 p)
 {
     p *= .5;
-    return smoothstep(.0, .8, fbm(p * vec3(1, 1, .2)) + .5 * fbm(p * vec3(2.5,2.5,1.)));
+    return smoothstep(.0, 1., fbm(p * vec3(1, 1, .2)) + .5 * fbm(p * vec3(2.5,2.5,1.)));
 }
 
 vec3 renderCloud(vec3 ro, vec3 rd, vec2 uv)
 {
     vec4 sum = vec4(0, .125, .25, 1);
-    sum.xyz *= .25;
+    sum.xyz *= .125;
    // float t = (300.0 - ro.y) / rd.y;
     //if (t < 0.) return sum.xyz;
     float t = 10.;
@@ -1141,7 +1211,7 @@ vec3 renderCloud(vec3 ro, vec3 rd, vec2 uv)
     for (int i = 0; i < 128; ++i)
     {
         vec3 p = ro + t * rd;
-        float d = mapCloud(p) * rnd;
+        float d = mapCloud(p);
 
         if (d > 0.)
         {
@@ -1174,8 +1244,9 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
 
     vec3 Lo = vec3(0);
 
-    vec3 cloud = vec3(0);// renderCloud(ro, rd, uv);
-    vec3 skycol = cloud;// *vec3(.585, .014, .0015);;
+    //vec3 cloud = vec3(0, .125, .25) * 0.125;// renderCloud(ro, rd, uv);
+    vec3 cloud =  renderCloud(ro, rd, uv);
+    vec3 skycol = cloud * vec3(.8,.5,.5) * .2;// *vec3(.585, .014, .0015);;
 
     //return sky;
 
@@ -1253,6 +1324,8 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
         ro = nextRo;
     }
 
+    vec3 fog = vec3(0, .125, .25) * 0.125;
+    fog = mix(fog, skycol, smoothstep(70., 90., t));
     Lo = mix(Lo, skycol, (1. - exp(-.0001 * t * t)));
     //Lo = mix(Lo, vec3(0., .5, 1.) * .003, smoothstep(8.,2.,4.*(length(uv*vec2(1.,2) + vec2(1.3, -2)))));
 
@@ -1266,7 +1339,7 @@ vec4 mainImage(vec2 fragCoord)
     {
         MAX_BOUNCES = 1;//  iCameraDirty > 0. ? 3 : 3;
         MARCHING_STEPS = 128;// iCameraDirty > 0. ? 128 : 1024;
-        MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
+        MARCHING_STEP_SCALE = 5.;// iCameraDirty > 0. ? 5. : 1.;
 
         // only update 1 out of 4 pixels when moving camera
         if (any( (uint2(fragCoord) ) % 2 != 0))
@@ -1274,7 +1347,7 @@ vec4 mainImage(vec2 fragCoord)
     }
     else
     {
-        MAX_BOUNCES = 1;//  iCameraDirty > 0. ? 3 : 3;
+        MAX_BOUNCES = 3;//  iCameraDirty > 0. ? 3 : 3;
         MARCHING_STEPS = 1024;// iCameraDirty > 0. ? 128 : 1024;
         MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
     }
@@ -1294,9 +1367,10 @@ vec4 mainImage(vec2 fragCoord)
 
     vec3 ro = vec3(RayOrigin.x, RayOrigin.y, RayOrigin.z);
     vec3 ta = vec3(RayTarget.x, RayTarget.y, RayTarget.z);
-
+    //vec3 upvec = vec3(0, 1, 0);
+    vec3 upvec = UpVector;
     vec3 forward = normalize(ta - ro);
-    vec3 right = normalize(cross(forward, UpVector));
+    vec3 right = normalize(cross(forward, upvec));
     //vec3 right = normalize(cross(UpVector, forward));
     //vec3 up = normalize(cross(forward, right));
     vec3 up = normalize(cross(right, forward));
