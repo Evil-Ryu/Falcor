@@ -20,7 +20,7 @@ ShaderEditor::~ShaderEditor()
 {
 }
 
-Texture::SharedPtr ShaderEditor::loadImage()
+ref<Texture> ShaderEditor::loadImage()
 {
     bool generateMips = true;
     bool loadSRGB = false;
@@ -32,7 +32,7 @@ Texture::SharedPtr ShaderEditor::loadImage()
     filterVec.push_back(FileDialogFilter("bmp"));
     filterVec.push_back(FileDialogFilter("png"));
 
-    Texture::SharedPtr pTex = nullptr;
+    ref<Texture> pTex = nullptr;
 
     if (openFileDialog(filterVec, path))
     {
@@ -64,6 +64,7 @@ void ShaderEditor::resetCamera()
 // for capturing skybox
 void ShaderEditor::RotateCamera90AroundUp()
 {
+    #if 0
     auto mpCamera = mCameras[0];
 
     float3 camPos = mpCamera->getPosition();
@@ -89,30 +90,33 @@ void ShaderEditor::RotateCamera90AroundUp()
 
     mpCamera->setTarget(camPos + viewDir);
     mpCamera->setUpVector(camUp);
+    #endif
 }
 
 void ShaderEditor::RotateCamera90AroundRight()
 {
+    #if 0
     auto mpCamera = mCameras[0];
 
     float3 camPos = mpCamera->getPosition();
     float3 camTarget = mpCamera->getTarget();
     float3 camUp = mpCamera->getUpVector();
 
-    float3 viewDir = glm::normalize(camTarget - camPos);
+    float3 viewDir = normalize(camTarget - camPos);
 
-    float3 sideway = glm::cross(viewDir, normalize(camUp));
+    float3 sideway = cross(viewDir, normalize(camUp));
 
-    float2 rotation = float2(glm::pi<float>() / 2., glm::pi<float>() / 2.);
+    float2 rotation = float2(pi<float>() / 2., pi<float>() / 2.);
 
     // Rotate around x-axis
-    glm::quat qy = glm::angleAxis(rotation.y, sideway);
-    glm::mat3 rotY(qy);
+    math::quat qy = math::angleAxis(rotation.y, sideway);
+    mat3 rotY(qy);
     viewDir = viewDir * rotY;
     camUp = camUp * rotY;
 
     mpCamera->setTarget(camPos + viewDir);
     mpCamera->setUpVector(camUp);
+    #endif
 }
 
 void ShaderEditor::createFbos(uint32_t width, uint32_t height)
@@ -127,7 +131,7 @@ void ShaderEditor::createFbos(uint32_t width, uint32_t height)
 
     for (int i = 0; i < MAX_PASSES; ++i)
     {
-        mPasses[i].mFbo = Fbo::create2D(width, height, fboDesc, 1, mipLevels);
+        mPasses[i].mFbo = Fbo::create2D(mpDevice, width, height, fboDesc, 1, mipLevels);
     }
 }
 
@@ -198,7 +202,7 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
     createDebugResources();
 }
 
-void ShaderEditor::setCommonVars(FullScreenPass::SharedPtr& pass, float w, float h)
+void ShaderEditor::setCommonVars(ref<FullScreenPass>& pass, float w, float h)
 {
     pass["ToyCB"]["iResolution"] = float2(w, h);
 
@@ -338,7 +342,7 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
     }
 
 
-    Texture::SharedPtr passOutput = nullptr;
+    ref<Texture> passOutput = nullptr;
     if(lastPass >= 0)
         passOutput = mPasses[lastPass].mFbo->getColorTexture(0);
     // copy the result of the last pass to the target fbo

@@ -1148,25 +1148,6 @@ bool GuiImpl::addMatrixVar(const char label[], math::matrix<T, R, C>& var, float
         }
         else if (i == 1)
         {
-<<<<<<< HEAD
-            return addScalarSliderHelper(label, var, ImGuiDataType_S64, minVal, maxVal, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T, uint64_t>::value)
-        {
-            return addScalarSliderHelper(label, var, ImGuiDataType_U64, minVal, maxVal, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T, float>::value)
-        {
-            return addScalarSliderHelper(label, var, ImGuiDataType_Float, minVal, maxVal, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T, double>::value)
-        {
-            return addScalarSliderHelper(label, var, ImGuiDataType_Double, minVal, maxVal, sameLine, displayFormat);
-        }
-        else
-        {
-            //static_assert(false, "Unsupported data type");
-=======
             bottomRight.y = topLeft.y + (bottomRight.y - topLeft.y) * (var.getColCount());
             bottomRight.x -= ImGui::GetStyle().ItemInnerSpacing.x * 3 - 1;
             bottomRight.y -= ImGui::GetStyle().ItemInnerSpacing.y - 1;
@@ -1176,7 +1157,6 @@ bool GuiImpl::addMatrixVar(const char label[], math::matrix<T, R, C>& var, float
             colorVec4.w *= 0.25f;
             ImU32 color = ImGui::ColorConvertFloat4ToU32(colorVec4);
             ImGui::GetWindowDrawList()->AddRect(topLeft, bottomRight, color);
->>>>>>> nvidia/master
         }
     }
     return b;
@@ -1282,41 +1262,9 @@ void Gui::render(RenderContext* pContext, const ref<Fbo>& pFbo, float elapsedTim
 
     if (pDrawData->CmdListsCount > 0)
     {
-<<<<<<< HEAD
-        if constexpr (std::is_same<T::value_type, int32_t>::value)
-        {
-            return addVecVarHelper(label, var, ImGuiDataType_S32, minVal, maxVal, step, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T::value_type, uint32_t>::value)
-        {
-            return addVecVarHelper(label, var, ImGuiDataType_U32, minVal, maxVal, step, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T::value_type, int64_t>::value)
-        {
-            return addVecVarHelper(label, var, ImGuiDataType_S64, minVal, maxVal, step, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T::value_type, uint64_t>::value)
-        {
-            return addVecVarHelper(label, var, ImGuiDataType_U64, minVal, maxVal, step, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T::value_type, float>::value)
-        {
-            return addVecVarHelper(label, var, ImGuiDataType_Float, minVal, maxVal, step, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T::value_type, uint64_t>::value)
-        {
-            return addVecVarHelper(label, var, ImGuiDataType_U64, minVal, maxVal, step, sameLine, displayFormat);
-        }
-        else
-        {
-            //static_assert(false, "Unsupported data type");
-        }
-    }
-=======
         // Update the VAO
         const ref<Vao>& pVao = mpWrapper->getNextVao(pDrawData->TotalVtxCount, pDrawData->TotalIdxCount);
         mpWrapper->mpPipelineState->setVao(pVao);
->>>>>>> nvidia/master
 
         // Upload the data
         ImDrawVert* pVerts = (ImDrawVert*)pVao->getVertexBuffer(0)->map();
@@ -1330,33 +1278,9 @@ void Gui::render(RenderContext* pContext, const ref<Fbo>& pFbo, float elapsedTim
             pVerts += pCmdList->VtxBuffer.Size;
             pIndices += pCmdList->IdxBuffer.Size;
         }
-<<<<<<< HEAD
-        else if constexpr (std::is_same<T::value_type, uint32_t>::value)
-        {
-            return addVecSliderHelper(label, var, ImGuiDataType_U32, minVal, maxVal, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T::value_type, int64_t>::value)
-        {
-            return addVecSliderHelper(label, var, ImGuiDataType_S64, minVal, maxVal, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T::value_type, uint64_t>::value)
-        {
-            return addVecSliderHelper(label, var, ImGuiDataType_U64, minVal, maxVal, sameLine, displayFormat);
-        }
-        else if constexpr (std::is_same<T::value_type, float>::value)
-        {
-            return addVecSliderHelper(label, var, ImGuiDataType_Float, minVal, maxVal, sameLine, displayFormat);
-        }
-        else
-        {
-            //static_assert(false, "Unsupported data type");
-        }
-    }
-=======
         pVao->getVertexBuffer(0)->unmap();
         pVao->getIndexBuffer()->unmap();
         mpWrapper->mpPipelineState->setFbo(pFbo);
->>>>>>> nvidia/master
 
         // Setup viewport
         GraphicsState::Viewport vp;

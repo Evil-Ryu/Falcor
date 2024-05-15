@@ -2,6 +2,9 @@
 #pragma once
 #include "Falcor.h"
 
+#include "Core/SampleApp.h"
+#include "Core/Pass/FullScreenPass.h"
+
 using namespace Falcor;
 
 
