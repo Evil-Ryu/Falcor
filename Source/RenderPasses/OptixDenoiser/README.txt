@@ -7,9 +7,6 @@ See the main README on how to install OptiX.
 
 When using this pass in a Python render graph:
 
-* Make sure to add to your Python script:
-    - loadRenderPassLibrary("OptixDenoiser.dll")
-
 * Create a pass something like this:  (Default settings are pretty good, see config options below.)
     - graph.addPass(createPass("OptixDenoiser", {}), "Denoiser")
 
@@ -45,8 +42,7 @@ By default, when connecting the OptiX denoiser to a render graph, it is:
       alpha is irrelevant.
 
   (d) Uses either the HDR or Temporal OptiX denoiser (depending if motion vectors are provided)
-      - Can be overridden in the Python file via 'model' : OptixDenoiserModel.LDR, OptixDenoiserModel.HDR,
-        or OptixDenoiserModel.Temporal
+      - Can be overridden in the Python file via 'model' : 'LDR', 'HDR', 'AOV' or 'Temporal'
 
   (e) Using the most guides possible.
       - If you pass in noisy color only, no guides are used.

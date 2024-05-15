@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,27 +26,27 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 __exported import Rendering.Materials.IMaterial;
-__exported import Rendering.Materials.HairBSDF;
+__exported import Rendering.Materials.HairMaterialInstance;
 import Scene.Material.BasicMaterialData;
 
 /** Implementation of Falcor's standard hair/fur material.
-*/
-struct HairMaterial : IMaterial
+ */
+struct HairMaterial : MaterialBase, IMaterial
 {
-    MaterialHeader header;
     BasicMaterialData data;
 
-    // Specify that the associated `BSDF` type is `HairBSDF`.
-    typedef HairBSDF BSDF;
+    // Specify that the associated `MaterialInstance` type is `HairMaterialInstance`.
+    typedef HairMaterialInstance MaterialInstance;
 
-    HairBSDF setupBSDF(const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod)
+    HairMaterialInstance setupMaterialInstance(const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod, const uint hints)
     {
         SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
 
-        HairBSDFData d = {};
+        HairChiang16Data d = {};
 
-        d.IoR = data.IoR;
-        d.eta = sd.frontFacing ? (sd.IoR / data.IoR) : (data.IoR / sd.IoR);
+        float16_t IoR = header.getIoR();
+        d.IoR = IoR;
+        d.eta = sd.frontFacing ? (sd.IoR / IoR) : (IoR / sd.IoR);
 
         // Sample base color.
         const float3 baseColor = ms.sampleTexture(data.texBaseColor, s, sd.uv, data.baseColor, lod).rgb;
@@ -59,12 +59,21 @@ struct HairMaterial : IMaterial
         d.betaN = spec.y;
         d.alpha = spec.z;
 
-        return HairBSDF(d);
+        // Compute final shading frame.
+        // Do not flip the shading normal for backfacing hits. The BSDF handles transmission from both sides.
+        ShadingFrame sf = sd.frame;
+        if (isAdjustShadingNormalEnabled(hints))
+        {
+            adjustShadingNormal(sd, sf);
+        }
+
+        return HairMaterialInstance(sf, d);
     }
 
-    // Normal mapping is not supported by this material.
-    void modifyTangentSpace(const MaterialSystem ms, const float4 tangentW, const ITextureSampler lod, inout ShadingData sd) {}
-
-    // Alpha testing is not supported by this material.
-    float evalOpacity(const MaterialSystem ms, const VertexData v, const ITextureSampler lod) { return 1.f; }
+    [Differentiable]
+    HairMaterialInstance setupDiffMaterialInstance(out DiffMaterialData diffData, const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod, const uint hints)
+    {
+        diffData = DiffMaterialData();
+        return no_diff setupMaterialInstance(ms, sd, lod, hints);
+    }
 };

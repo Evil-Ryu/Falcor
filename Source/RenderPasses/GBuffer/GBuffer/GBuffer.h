@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -31,12 +31,13 @@
 
 using namespace Falcor;
 
-/** Base class for the different G-buffer passes.
-*/
+/**
+ * Base class for the different G-buffer passes.
+ */
 class GBuffer : public GBufferBase
 {
 protected:
-    GBuffer(const Info& info);
+    GBuffer(ref<Device> pDevice);
 
     // Constants used in derived classes
     static const ChannelList kGBufferChannels;

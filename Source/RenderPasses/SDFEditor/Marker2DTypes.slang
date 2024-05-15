@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -31,13 +31,46 @@
 
 #ifdef HOST_CODE
 #include "Utils/SDF/SDFOperationType.slang"
-#include "Utils/SDF/SDF2DShapeType.slang"
 #else
 __exported import Utils.SDF.SDFOperationType;
-__exported import Utils.SDF.SDF2DShapeType;
 #endif
 
 BEGIN_NAMESPACE_FALCOR
+
+enum class SDF2DShapeType
+{
+    Circle,
+    Square,
+    Diamond,
+    Heart,
+    Chevron,
+    Ring,
+    Tag,
+    Cross,
+    Asterisk,
+    Infinity,
+    Pin,
+    Arrow,
+    RoundedBox,
+    Triangle,
+    RoundedLine,
+    Vector,
+    MarkerOpMarker,
+    ArrowFromTwoTris,
+    CircleSector
+};
+
+enum class ExcludeBorderFlags : uint32_t
+{
+    None = 0,
+    Top = 1,
+    Right = 2,
+    Bottom = 4,
+    Left = 8
+};
+#ifdef HOST_CODE
+FALCOR_ENUM_CLASS_OPERATORS(ExcludeBorderFlags)
+#endif
 
 struct Marker2DPayload
 {
@@ -46,15 +79,15 @@ struct Marker2DPayload
 
 struct Marker2DDataBlob
 {
-    SDF2DShapeType  type;
+    SDF2DShapeType type;
     Marker2DPayload payload;
 };
 
 struct Marker2DTransform
 {
-    float   scale;
-    float   rotation;
-    float2  translation;
+    float scale;
+    float rotation;
+    float2 translation;
 };
 
 struct SimpleMarker2DData
@@ -65,9 +98,9 @@ struct SimpleMarker2DData
 
 struct Marker2DRoundedLine
 {
-    float2  positionA;
-    float2  positionB;
-    float   width;
+    float2 positionA;
+    float2 positionB;
+    float width;
 };
 
 struct RoundedLineMarker2DData
@@ -120,6 +153,20 @@ struct ArrowFromTwoTrisMarker2DData
     float headLength;
     float headWidth;
     float4 color;
+};
+
+struct CircleSectorMarker2DData
+{
+    float2 position;
+    float rotation;
+    float angle;
+    float maxRadius;
+    float minRadius;
+    float4 color;
+    /// The color of the border in x,y,z and the border thickness in w. Uses the same alpha as color.a
+    float4 borderColor;
+    /// Flags for which borders should be excluded. Flags can be any of ExcludeBorderFlags OR'ed together.
+    uint excludeBorders;
 };
 
 END_NAMESPACE_FALCOR

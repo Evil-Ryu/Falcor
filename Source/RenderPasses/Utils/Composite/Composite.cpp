@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,58 +28,55 @@
 #include "Composite.h"
 #include "CompositeMode.slangh"
 
-const RenderPass::Info Composite::kInfo { "Composite", "Composite pass." };
-
 namespace
 {
-    const std::string kShaderFile("RenderPasses/Utils/Composite/Composite.cs.slang");
+const std::string kShaderFile("RenderPasses/Utils/Composite/Composite.cs.slang");
 
-    const std::string kInputA = "A";
-    const std::string kInputB = "B";
-    const std::string kOutput = "out";
+const std::string kInputA = "A";
+const std::string kInputB = "B";
+const std::string kOutput = "out";
 
-    const std::string kMode = "mode";
-    const std::string kScaleA = "scaleA";
-    const std::string kScaleB = "scaleB";
-    const std::string kOutputFormat = "outputFormat";
+const std::string kMode = "mode";
+const std::string kScaleA = "scaleA";
+const std::string kScaleB = "scaleB";
+const std::string kOutputFormat = "outputFormat";
 
-    const Gui::DropdownList kModeList =
-    {
-        { (uint32_t)Composite::Mode::Add, "Add" },
-        { (uint32_t)Composite::Mode::Multiply, "Multiply" },
-    };
-}
+const Gui::DropdownList kModeList = {
+    {(uint32_t)Composite::Mode::Add, "Add"},
+    {(uint32_t)Composite::Mode::Multiply, "Multiply"},
+};
+} // namespace
 
-Composite::SharedPtr Composite::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    return SharedPtr(new Composite(dict));
-}
-
-Composite::Composite(const Dictionary& dict)
-    : RenderPass(kInfo)
+Composite::Composite(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
     // Parse dictionary.
-    for (const auto& [key, value] : dict)
+    for (const auto& [key, value] : props)
     {
-        if (key == kMode) mMode = value;
-        else if (key == kScaleA) mScaleA = value;
-        else if (key == kScaleB) mScaleB = value;
-        else if (key == kOutputFormat) mOutputFormat = value;
-        else logWarning("Unknown field '{}' in Composite pass dictionary.", key);
+        if (key == kMode)
+            mMode = value;
+        else if (key == kScaleA)
+            mScaleA = value;
+        else if (key == kScaleB)
+            mScaleB = value;
+        else if (key == kOutputFormat)
+            mOutputFormat = value;
+        else
+            logWarning("Unknown property '{}' in Composite pass properties.", key);
     }
 
     // Create resources.
-    mCompositePass = ComputePass::create(kShaderFile, "main", Program::DefineList(), false);
+    mCompositePass = ComputePass::create(mpDevice, kShaderFile, "main", DefineList(), false);
 }
 
-Dictionary Composite::getScriptingDictionary()
+Properties Composite::getProperties() const
 {
-    Dictionary dict;
-    dict[kMode] = mMode;
-    dict[kScaleA] = mScaleA;
-    dict[kScaleB] = mScaleB;
-    if (mOutputFormat != ResourceFormat::Unknown) dict[kOutputFormat] = mOutputFormat;
-    return dict;
+    Properties props;
+    props[kMode] = mMode;
+    props[kScaleA] = mScaleA;
+    props[kScaleB] = mScaleB;
+    if (mOutputFormat != ResourceFormat::Unknown)
+        props[kOutputFormat] = mOutputFormat;
+    return props;
 }
 
 RenderPassReflection Composite::reflect(const CompileData& compileData)
@@ -99,7 +96,7 @@ void Composite::compile(RenderContext* pRenderContext, const CompileData& compil
 void Composite::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
     // Prepare program.
-    const auto& pOutput = renderData[kOutput]->asTexture();
+    const auto& pOutput = renderData.getTexture(kOutput);
     FALCOR_ASSERT(pOutput);
     mOutputFormat = pOutput->getFormat();
 
@@ -109,26 +106,26 @@ void Composite::execute(RenderContext* pRenderContext, const RenderData& renderD
     }
 
     // Bind resources.
-    auto var = mCompositePass["CB"];
-    var["frameDim"] = mFrameDim;
-    var["scaleA"] = mScaleA;
-    var["scaleB"] = mScaleB;
+    auto var = mCompositePass->getRootVar();
+    var["CB"]["frameDim"] = mFrameDim;
+    var["CB"]["scaleA"] = mScaleA;
+    var["CB"]["scaleB"] = mScaleB;
+    var["A"] = renderData.getTexture(kInputA); // Can be nullptr
 
-    mCompositePass["A"] = renderData[kInputA]->asTexture(); // Can be nullptr
-    mCompositePass["B"] = renderData[kInputB]->asTexture(); // Can be nullptr
-    mCompositePass["output"] = pOutput;
+    var["B"] = renderData.getTexture(kInputB); // Can be nullptr
+    var["output"] = pOutput;
     mCompositePass->execute(pRenderContext, mFrameDim.x, mFrameDim.y);
 }
 
 void Composite::renderUI(Gui::Widgets& widget)
 {
     widget.text("This pass scales and composites inputs A and B together");
-    widget.dropdown("Mode", kModeList, reinterpret_cast<uint32_t&>(mMode));
+    widget.dropdown("Mode", mMode);
     widget.var("Scale A", mScaleA);
     widget.var("Scale B", mScaleB);
 }
 
-Program::DefineList Composite::getDefines() const
+DefineList Composite::getDefines() const
 {
     uint32_t compositeMode = 0;
     switch (mMode)
@@ -159,16 +156,9 @@ Program::DefineList Composite::getDefines() const
         break;
     }
 
-    Program::DefineList defines;
+    DefineList defines;
     defines.add("COMPOSITE_MODE", std::to_string(compositeMode));
     defines.add("OUTPUT_FORMAT", std::to_string(outputFormat));
 
     return defines;
-}
-
-void Composite::registerBindings(pybind11::module& m)
-{
-    pybind11::enum_<Composite::Mode> compositeMode(m, "CompositeMode");
-    compositeMode.value("Add", Composite::Mode::Add);
-    compositeMode.value("Multiply", Composite::Mode::Multiply);
 }

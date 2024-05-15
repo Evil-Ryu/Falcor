@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,54 +26,52 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
+#include "fwd.h"
+#include "Handles.h"
 #include "Raytracing.h"
+#include "Core/Macros.h"
+#include "Core/Object.h"
+#include "Core/Program/ProgramVersion.h"
+#include <string>
+#include <vector>
 
 namespace Falcor
 {
-    class FALCOR_API RtStateObject
+
+struct RtStateObjectDesc
+{
+    ref<const ProgramKernels> pProgramKernels;
+    uint32_t maxTraceRecursionDepth = 0;
+    RtPipelineFlags pipelineFlags = RtPipelineFlags::None;
+
+    bool operator==(const RtStateObjectDesc& other) const
     {
-    public:
-        using SharedPtr = std::shared_ptr<RtStateObject>;
-        using SharedConstPtr = std::shared_ptr<const RtStateObject>;
-        using ApiHandle = RaytracingStateHandle;
+        bool result = true;
+        result = result && (pProgramKernels == other.pProgramKernels);
+        result = result && (maxTraceRecursionDepth == other.maxTraceRecursionDepth);
+        result = result && (pipelineFlags == other.pipelineFlags);
+        return result;
+    }
+};
 
-        class FALCOR_API Desc
-        {
-        public:
-            Desc& setKernels(const ProgramKernels::SharedConstPtr& pKernels) { mpKernels = pKernels; return *this; }
-            Desc& setMaxTraceRecursionDepth(uint32_t maxDepth) { mMaxTraceRecursionDepth = maxDepth; return *this; }
-            Desc& setPipelineFlags(RtPipelineFlags flags) { mPipelineFlags = flags; return *this; }
+class FALCOR_API RtStateObject : public Object
+{
+    FALCOR_OBJECT(RtStateObject)
+public:
+    RtStateObject(ref<Device> pDevice, const RtStateObjectDesc& desc);
+    ~RtStateObject();
 
-            bool operator==(const Desc& other) const;
+    gfx::IPipelineState* getGfxPipelineState() const { return mGfxPipelineState; }
 
-        private:
-            ProgramKernels::SharedConstPtr mpKernels;
-            uint32_t mMaxTraceRecursionDepth = 0;
-            RtPipelineFlags mPipelineFlags = RtPipelineFlags::None;
-            friend RtStateObject;
-        };
+    const ref<const ProgramKernels>& getKernels() const { return mDesc.pProgramKernels; };
+    uint32_t getMaxTraceRecursionDepth() const { return mDesc.maxTraceRecursionDepth; }
+    void const* getShaderIdentifier(uint32_t index) const { return mEntryPointGroupExportNames[index].c_str(); }
+    const RtStateObjectDesc& getDesc() const { return mDesc; }
 
-        static SharedPtr create(const Desc& desc);
-        const ApiHandle& getApiHandle() const { return mApiHandle; }
-
-        const ProgramKernels::SharedConstPtr& getKernels() const { return mDesc.mpKernels; };
-        uint32_t getMaxTraceRecursionDepth() const { return mDesc.mMaxTraceRecursionDepth; }
-#if defined(FALCOR_D3D12)
-        void const* getShaderIdentifier(uint32_t index) const { return mShaderIdentifiers[index]; }
-#elif defined(FALCOR_GFX)
-        void const* getShaderIdentifier(uint32_t index) const { return mEntryPointGroupExportNames[index].c_str(); }
-#endif
-        const Desc& getDesc() const { return mDesc; }
-    private:
-        RtStateObject(const Desc& desc);
-        void apiInit();
-
-        Desc mDesc;
-        ApiHandle mApiHandle;
-#if defined(FALCOR_D3D12)
-        std::vector<void const*> mShaderIdentifiers;
-#elif defined(FALCOR_GFX)
-        std::vector<std::string> mEntryPointGroupExportNames;
-#endif
-    };
-}
+private:
+    ref<Device> mpDevice;
+    RtStateObjectDesc mDesc;
+    Slang::ComPtr<gfx::IPipelineState> mGfxPipelineState;
+    std::vector<std::string> mEntryPointGroupExportNames;
+};
+} // namespace Falcor

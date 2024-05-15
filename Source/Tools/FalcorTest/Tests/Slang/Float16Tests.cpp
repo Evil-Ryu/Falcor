@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,53 +26,64 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "Testing/UnitTest.h"
+#include "Utils/HostDeviceShared.slangh"
+#include <random>
 
 namespace Falcor
 {
-    namespace
+namespace
+{
+std::vector<ShaderModel> kShaderModels = {
+    {ShaderModel::SM6_2},
+    {ShaderModel::SM6_3},
+};
+
+const uint32_t kNumElems = 256;
+std::mt19937 r;
+std::uniform_real_distribution u;
+
+void test(GPUUnitTestContext& ctx, ShaderModel shaderModel, bool useUav)
+{
+    ref<Device> pDevice = ctx.getDevice();
+
+    DefineList defines = {{"USE_UAV", useUav ? "1" : "0"}};
+
+    ctx.createProgram("Tests/Slang/Float16Tests.cs.slang", "testFloat16", defines, SlangCompilerFlags::None, shaderModel);
+    ctx.allocateStructuredBuffer("result", kNumElems);
+
+    std::vector<uint16_t> elems(kNumElems);
+    for (auto& v : elems)
+        v = f32tof16(float(u(r)));
+    auto var = ctx.vars().getRootVar();
+    auto pBuf = pDevice->createStructuredBuffer(
+        var["data"],
+        kNumElems,
+        ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+        MemoryType::DeviceLocal,
+        elems.data()
+    );
+    var["data"] = pBuf;
+
+    ctx.runProgram(kNumElems, 1, 1);
+
+    // Verify results.
+    std::vector<uint16_t> result = ctx.readBuffer<uint16_t>("result");
+    for (uint32_t i = 0; i < kNumElems; i++)
     {
-        std::vector<std::string> kShaderModels =
-        {
-            { "6_2" },
-            { "6_3" },
-        };
-
-        const uint32_t kNumElems = 256;
-        std::mt19937 r;
-        std::uniform_real_distribution u;
-
-        void test(GPUUnitTestContext& ctx, const std::string& shaderModel, bool useUav)
-        {
-            Program::DefineList defines = { {"USE_UAV", useUav ? "1" : "0"} };
-
-            ctx.createProgram("Tests/Slang/Float16Tests.cs.slang", "testFloat16", defines, Shader::CompilerFlags::None, shaderModel);
-            ctx.allocateStructuredBuffer("result", kNumElems);
-
-            std::vector<uint16_t> elems(kNumElems);
-            for (auto& v : elems) v = f32tof16(float(u(r)));
-            auto var = ctx.vars().getRootVar();
-            auto pBuf = Buffer::createStructured(var["data"], kNumElems, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, elems.data());
-            var["data"] = pBuf;
-
-            ctx.runProgram(kNumElems, 1, 1);
-
-            // Verify results.
-            const uint16_t* result = ctx.mapBuffer<const uint16_t>("result");
-            for (uint32_t i = 0; i < kNumElems; i++)
-            {
-                EXPECT_EQ(result[i], elems[i]) << "i = " << i << " shaderModel=" << shaderModel;
-            }
-            ctx.unmapBuffer("result");
-        }
-    }
-
-    GPU_TEST(StructuredBufferLoadFloat16)
-    {
-        for (auto sm : kShaderModels) test(ctx, sm, false);
-    }
-
-    GPU_TEST(RWStructuredBufferLoadFloat16)
-    {
-        for (auto sm : kShaderModels) test(ctx, sm, true);
+        EXPECT_EQ(result[i], elems[i]) << "i = " << i << " shaderModel=" << enumToString(shaderModel);
     }
 }
+} // namespace
+
+GPU_TEST(StructuredBufferLoadFloat16)
+{
+    for (auto sm : kShaderModels)
+        test(ctx, sm, false);
+}
+
+GPU_TEST(RWStructuredBufferLoadFloat16)
+{
+    for (auto sm : kShaderModels)
+        test(ctx, sm, true);
+}
+} // namespace Falcor

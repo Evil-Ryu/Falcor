@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,13 +25,15 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-import Scene.Material.ShadingUtils;
 import Scene.Material.TextureHandle;
 import Scene.Material.TextureSampler;
+import Scene.Material.AlphaTest;
+import Rendering.Volumes.PhaseFunction;
+import Utils.SlangUtils;
 __exported import Scene.SceneTypes;
 __exported import Scene.Displacement.DisplacementData;
 __exported import Scene.Material.BasicMaterialData;
-__exported import Scene.Material.HomogeneousVolumeData;
+__exported import Scene.Material.VolumeProperties;
 
 #if !defined(MATERIAL_SYSTEM_TEXTURE_DESC_COUNT) || !defined(MATERIAL_SYSTEM_SAMPLER_DESC_COUNT) || !defined(MATERIAL_SYSTEM_BUFFER_DESC_COUNT)
 // This error occurs when the module is imported without setting the defines returned by getDefines().
@@ -47,18 +49,24 @@ struct MaterialSystem
     StructuredBuffer<MaterialDataBlob> materialData;                            ///< Material parameters. The format of the data blob depends on the material type.
     SamplerState materialSamplers[MATERIAL_SYSTEM_SAMPLER_DESC_COUNT];          ///< Sampler states for all materials. TODO: Make this an unbounded array (see #1321).
 
-#if MATERIAL_SYSTEM_TEXTURE_DESC_COUNT > 0
-    Texture2D<float4> materialTextures[MATERIAL_SYSTEM_TEXTURE_DESC_COUNT];     ///< Texture resources for all materials. TODO: Make this an unbounded array (see #1321).
-#else
-    Texture2D<float4> materialTextures[1]; // Zero-length arrays are not supported.
-#endif
+    /// Texture resources for all materials. TODO: Make this an unbounded array (see #1321).
+    Texture2D<float4> materialTextures[ArrayMax<1, MATERIAL_SYSTEM_TEXTURE_DESC_COUNT>.value];
 
-#if MATERIAL_SYSTEM_BUFFER_DESC_COUNT > 0
-    ByteAddressBuffer materialBuffers[MATERIAL_SYSTEM_BUFFER_DESC_COUNT];       ///< Buffer resources for all materials. TODO: Make this an unbounded array (see #1321).
-#else
-    ByteAddressBuffer materialBuffers[1]; // Zero-length arrays are not supported.
-#endif
+    /// Buffer resources for all materials. TODO: Make this an unbounded array (see #1321).
+    ByteAddressBuffer materialBuffers[ArrayMax<1, MATERIAL_SYSTEM_BUFFER_DESC_COUNT>.value];
 
+    Texture3D<float4> materialTextures3D[ArrayMax<1, MATERIAL_SYSTEM_TEXTURE_3D_DESC_COUNT>.value];
+
+
+    /**
+     * When UDIMs are used, this array contains indirection from <UDIM>-1001 to materialTextures.
+     *
+     * TextureHandle in an UDIM mode points to this array rather than to the materialTextures,
+     * and the index is the base offset. The specific texture index is found as handle's
+     * texID + int(u) + 10 * int(v). If the index is -1, then the texture does not exist
+     * and the texture handle is uniform instead.
+     */
+    StructuredBuffer<int> udimIndirection;
 
     /** Get the total number of materials.
     */
@@ -107,12 +115,12 @@ struct MaterialSystem
     }
 
     /** Get a texture sampler by ID.
-        Note: the use of [__unsafeForceInlineEarly] causes Slang to inline this function in its output source.
+        Note: the use of [ForceInline] causes Slang to inline this function in its output source.
         Currently there is a bug in glslang/spv-out that generates invalid SPIRV code for functions that returns a SamplerState.
         We workaround this issue by always inlining this function in our generated glsl code.
     */
-#ifdef FALCOR_VK
-    [__unsafeForceInlineEarly]
+#ifdef FALCOR_VULKAN
+    [ForceInline]
 #endif
     SamplerState getTextureSampler(const uint samplerID)
     {
@@ -120,12 +128,12 @@ struct MaterialSystem
     }
 
     /** Get the default texture sampler for a material.
-        Note: the use of [__unsafeForceInlineEarly] causes Slang to inline this function in its output source.
+        Note: the use of [ForceInline] causes Slang to inline this function in its output source.
         Currently there is a bug in glslang/spv-out that generates invalid SPIRV code for functions that returns a SamplerState.
         We workaround this issue by always inlining this function in our generated glsl code.
     */
-#ifdef FALCOR_VK
-    [__unsafeForceInlineEarly]
+#ifdef FALCOR_VULKAN
+    [ForceInline]
 #endif
     SamplerState getDefaultTextureSampler(const uint materialID)
     {
@@ -140,6 +148,27 @@ struct MaterialSystem
         return materialBuffers[bufferID];
     }
 
+    Texture3D<float4> getTexture3D(const uint textureID)
+    {
+        return materialTextures3D[textureID];
+    }
+
+    /** Check if a material has displacement.
+        \param[in] materialID Material ID
+        \return Returns true if material has displacement.
+    */
+    bool isDisplaced(const uint materialID)
+    {
+        // This function only handle basic materials for now. Other material types return false.
+        // TODO: Generalize to support arbitrary materials (#1314).
+        if (isBasicMaterial(materialID))
+        {
+            BasicMaterialData md = getBasicMaterialData(materialID);
+            return getResolvedTextureHandle(md.texDisplacementMap).getMode() == TextureHandle::Mode::Texture;
+        }
+        return false;
+    }
+
     /** Check if a material has an emissive texture.
         \param[in] materialID Material ID
         \return Returns true if material has emissive texture.
@@ -151,7 +180,7 @@ struct MaterialSystem
         if (isBasicMaterial(materialID))
         {
             BasicMaterialData md = getBasicMaterialData(materialID);
-            return md.texEmissive.getMode() == TextureHandle::Mode::Texture;
+            return getResolvedTextureHandle(md.texEmissive).getMode() == TextureHandle::Mode::Texture;
         }
         return false;
     }
@@ -183,21 +212,60 @@ struct MaterialSystem
     */
     float evalIoR(const uint materialID)
     {
-        // TODO: Move IoR field into MaterialHeader so it's available for all material types.
-        if (isBasicMaterial(materialID))
+        return getMaterialHeader(materialID).getIoR();
+    }
+
+    /** Resolves TextureHandle from possibly-UDIM to standard TextureHandle
+        \param[in] handle Texture handle with possibly UDIM flag
+        \param[in, out] uv Texture coordinates, used to determine UDIM, and modified into 0-1 range if UDIMs are used
+        \return Texture handle with UDIM flag resolved away
+     */
+    TextureHandle getResolvedTextureHandle(const TextureHandle handle, inout float2 uv)
+    {
+#if MATERIAL_SYSTEM_UDIM_INDIRECTION_ENABLED == 0 // we have no UDIMs
+        return handle;
+#else
+        if (!handle.getUdimEnabled())
+            return handle;
+        uint udimBase = handle.getTextureID();
+        uint udimID = udimBase + uint(uv[0]) + 10 * uint(uv[1]);
+        uv = frac(uv);
+        int texID = -1;
+        uint numStructs, stride;
+        udimIndirection.GetDimensions(numStructs, stride);
+        if (udimID < numStructs)
+            texID = udimIndirection[udimID];
+
+        TextureHandle result = handle;
+        if (texID == -1)
         {
-            BasicMaterialData md = getBasicMaterialData(materialID);
-            return md.IoR;
+            result.setMode(TextureHandle::Mode::Uniform);
+            return result;
         }
-        return 1.f;
+        else
+        {
+            result.setTextureID(texID);
+            result.setUdimEnabled(false);
+        }
+        return result;
+#endif
+    }
+
+    /** Resolves TextureHandle for the first UDIM, to get generic texture info
+     */
+    TextureHandle getResolvedTextureHandle(const TextureHandle handle)
+    {
+        float2 uv00 = { 0.f, 0.f };
+        return getResolvedTextureHandle(handle, uv00);
     }
 
     /** Get information about a texture.
         \param[in] handle Texture handle.
         \return Texture info or zero initialized struct if no texture.
     */
-    TextureInfo getTextureInfo(const TextureHandle handle)
+    TextureInfo getTextureInfo(TextureHandle handle)
     {
+        handle = getResolvedTextureHandle(handle);
         TextureInfo info = {};
         switch (handle.getMode())
         {
@@ -231,8 +299,9 @@ struct MaterialSystem
         \param[in] lod Method for computing texture level-of-detail, must implement the `ITextureSampler` interface.
         \return Sampled color.
     */
-    float4 sampleTexture<L:ITextureSampler>(const TextureHandle handle, SamplerState s, const float2 uv, const float4 uniformValue, L lod)
+    float4 sampleTexture<L:ITextureSampler>(TextureHandle handle, SamplerState s, float2 uv, const float4 uniformValue, L lod)
     {
+        handle = getResolvedTextureHandle(handle, uv);
         switch (handle.getMode())
         {
         case TextureHandle::Mode::Uniform:
@@ -267,9 +336,10 @@ struct MaterialSystem
             displacementData.scale = md.displacementScale;
             displacementData.bias = md.displacementOffset;
 
-            if (md.texDisplacementMap.getMode() == TextureHandle::Mode::Texture)
+            TextureHandle displacementHandle = getResolvedTextureHandle(md.texDisplacementMap);
+            if (displacementHandle.getMode() == TextureHandle::Mode::Texture)
             {
-                textureID = md.texDisplacementMap.getTextureID();
+                textureID = displacementHandle.getTextureID();
                 samplerID = getMaterialHeader(materialID).getDefaultTextureSamplerID();
                 displacementMinSamplerID = md.getDisplacementMinSamplerID();
                 displacementMaxSamplerID = md.getDisplacementMaxSamplerID();
@@ -285,21 +355,37 @@ struct MaterialSystem
         displacementData.samplerStateMax = materialSamplers[displacementMaxSamplerID];
     }
 
-    /** Get the homogeneous medium properties of a material.
-        \param[in] materialID Material ID.
-        \return Returns the homogeneous volume data.
+    /** Perform alpha test at a hit point and return the result.
+        \param[in] v Interpolated vertex data.
+        \param[in] materialID Material ID at the hit.
+        \param[in] lod Method for computing texture level-of-detail, must implement the `ITextureSampler` interface.
+        \return True if hit should be ignored/discarded.
     */
-    HomogeneousVolumeData getHomogeneousVolumeData(const uint materialID)
+    bool alphaTest<L : ITextureSampler>(const VertexData v, const uint materialID, L lod)
     {
-        // This function fetches the volume parameters from a basic material, where these fields are readily available.
-        // Other materials are assigned default values of all zeros.
-        // TODO: Refactor volume support to handle arbitrary materials (#1313).
-        BasicMaterialData md = {};
-        if (isBasicMaterial(materialID))
-        {
-            md = getBasicMaterialData(materialID);
-        }
-        return { md.volumeAbsorption, md.volumeScattering, md.volumeAnisotropy };
+        // Load the material header first and early out if alpha test not supported.
+        const MaterialHeader header = materialData[materialID].header;
+
+        if (header.getAlphaMode() != AlphaMode::Mask) return false;
+
+        SamplerState s = getTextureSampler(header.getDefaultTextureSamplerID());
+        float alpha = sampleTexture(header.getAlphaTextureHandle(), s, v.texC, float4(1.f), lod).a;
+        float alphaThreshold = header.getAlphaThreshold();
+
+        return evalAlphaTest(alpha, alphaThreshold, v.posW);
+    }
+
+    /** Perform alpha test at a hit point and return the result.
+        This version samples alpha at a fixed level of detail.
+        \param[in] v Interpolated vertex data.
+        \param[in] materialID Material ID at the hit.
+        \param[in] lod Fixed texture level of detail.
+        \return True if hit should be ignored/discarded.
+    */
+    bool alphaTest(const VertexData v, const uint materialID, const float lod)
+    {
+        ExplicitLodTextureSampler explicitLOD = { lod };
+        return alphaTest(v, materialID, explicitLOD);
     }
 };
 

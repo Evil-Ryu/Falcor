@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,11 +25,16 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "BasicMaterial.h"
-#include "Core/Program/GraphicsProgram.h"
+#include "MaterialSystem.h"
+#include "Core/API/Device.h"
+#include "Core/API/RenderContext.h"
+#include "Core/Program/Program.h"
 #include "Core/Program/ProgramVars.h"
+#include "Utils/Logger.h"
+#include "Utils/Math/Common.h"
 #include "Utils/Color/ColorHelpers.slang"
+#include "Utils/Scripting/ScriptBindings.h"
 
 namespace Falcor
 {
@@ -44,10 +49,11 @@ namespace Falcor
         const float kMaxVolumeAnisotropy = 0.99f;
     }
 
-    BasicMaterial::BasicMaterial(const std::string& name, MaterialType type)
-        : Material(name, type)
+    BasicMaterial::BasicMaterial(ref<Device> pDevice, const std::string& name, MaterialType type)
+        : Material(pDevice, name, type)
     {
         mHeader.setIsBasicMaterial(true);
+        mHeader.setIoR(1.5h);
 
         // Setup common texture slots.
         mTextureSlotInfo[(uint32_t)TextureSlot::Displacement] = { "displacement", TextureChannelFlags::RGB, false };
@@ -56,6 +62,7 @@ namespace Falcor
         updateAlphaMode();
         updateNormalMapType();
         updateEmissiveFlag();
+        updateDeltaSpecularFlag();
     }
 
     bool BasicMaterial::renderUI(Gui::Widgets& widget)
@@ -74,15 +81,13 @@ namespace Falcor
             bool alphaConst = mIsTexturedAlphaConstant && hasAlpha;
             bool colorConst = mIsTexturedBaseColorConstant;
 
-            std::ostringstream oss;
-            oss << "Texture info: " << pTexture->getWidth() << "x" << pTexture->getHeight()
-                << " (" << to_string(pTexture->getFormat()) << ")";
-            if (colorConst && !alphaConst) oss << " (color constant)";
-            else if (!colorConst && alphaConst) oss << " (alpha constant)";
-            else if (colorConst && alphaConst) oss << " (color and alpha constant)"; // Shouldn't happen
+            std::string str = fmt::format("Texture info: {}x{} ({})", pTexture->getWidth(), pTexture->getHeight(), to_string(pTexture->getFormat()));
+            if (colorConst && !alphaConst) str += " (color constant)";
+            else if (!colorConst && alphaConst) str += " (alpha constant)";
+            else if (colorConst && alphaConst) str += " (color and alpha constant)"; // Shouldn't happen
 
             widget.text("Base color: " + pTexture->getSourcePath().string());
-            widget.text(oss.str());
+            widget.text(str);
 
             if (colorConst || alphaConst)
             {
@@ -90,7 +95,7 @@ namespace Falcor
                 if (widget.var("Base color", baseColor, 0.f, 1.f, 0.01f)) setBaseColor(baseColor);
             }
 
-            widget.image("Base color", pTexture, float2(100.f));
+            widget.image("Base color", pTexture.get(), float2(100.f));
             if (widget.button("Remove texture##BaseColor")) setBaseColorTexture(nullptr);
         }
         else
@@ -103,7 +108,7 @@ namespace Falcor
         {
             widget.text("Specular params: " + pTexture->getSourcePath().string());
             widget.text("Texture info: " + std::to_string(pTexture->getWidth()) + "x" + std::to_string(pTexture->getHeight()) + " (" + to_string(pTexture->getFormat()) + ")");
-            widget.image("Specular params", pTexture, float2(100.f));
+            widget.image("Specular params", pTexture.get(), float2(100.f));
             if (widget.button("Remove texture##Specular")) setSpecularTexture(nullptr);
         }
         else
@@ -119,7 +124,7 @@ namespace Falcor
         {
             widget.text("Normal map: " + pTexture->getSourcePath().string());
             widget.text("Texture info: " + std::to_string(pTexture->getWidth()) + "x" + std::to_string(pTexture->getHeight()) + " (" + to_string(pTexture->getFormat()) + ")");
-            widget.image("Normal map", pTexture, float2(100.f));
+            widget.image("Normal map", pTexture.get(), float2(100.f));
             if (widget.button("Remove texture##NormalMap")) setNormalMap(nullptr);
         }
 
@@ -127,7 +132,7 @@ namespace Falcor
         {
             widget.text("Displacement map: " + pTexture->getSourcePath().string());
             widget.text("Texture info: " + std::to_string(pTexture->getWidth()) + "x" + std::to_string(pTexture->getHeight()) + " (" + to_string(pTexture->getFormat()) + ")");
-            widget.image("Displacement map", pTexture, float2(100.f));
+            widget.image("Displacement map", pTexture.get(), float2(100.f));
             if (widget.button("Remove texture##DisplacementMap")) setDisplacementMap(nullptr);
 
             float scale = getDisplacementScale();
@@ -141,7 +146,7 @@ namespace Falcor
         {
             widget.text("Transmission color: " + pTexture->getSourcePath().string());
             widget.text("Texture info: " + std::to_string(pTexture->getWidth()) + "x" + std::to_string(pTexture->getHeight()) + " (" + to_string(pTexture->getFormat()) + ")");
-            widget.image("Transmission color", pTexture, float2(100.f));
+            widget.image("Transmission color", pTexture.get(), float2(100.f));
             if (widget.button("Remove texture##Transmission")) setTransmissionTexture(nullptr);
         }
         else
@@ -186,7 +191,6 @@ namespace Falcor
     {
         FALCOR_ASSERT(pOwner);
 
-        auto flags = Material::UpdateFlags::None;
         if (mUpdates != Material::UpdateFlags::None)
         {
             // Adjust material sidedness based on current parameters.
@@ -213,9 +217,13 @@ namespace Falcor
             mData.setDisplacementMaxSamplerID(pOwner->addTextureSampler(mpDisplacementMaxSampler));
             if (mData.flags != prevFlags) mUpdates |= Material::UpdateFlags::DataChanged;
 
-            flags |= mUpdates;
-            mUpdates = Material::UpdateFlags::None;
+            // Assume any update for an emissive materials can change its emissive properties.
+            if (mUpdates != Material::UpdateFlags::None && isEmissive())
+                mUpdates |= Material::UpdateFlags::EmissiveChanged;
         }
+
+        auto flags = mUpdates;
+        mUpdates = Material::UpdateFlags::None;
 
         return flags;
     }
@@ -255,16 +263,7 @@ namespace Falcor
         }
     }
 
-    void BasicMaterial::setIndexOfRefraction(float IoR)
-    {
-        if (mData.IoR != (float16_t)IoR)
-        {
-            mData.IoR = (float16_t)IoR;
-            markUpdates(UpdateFlags::DataChanged);
-        }
-    }
-
-    void BasicMaterial::setDefaultTextureSampler(const Sampler::SharedPtr& pSampler)
+    void BasicMaterial::setDefaultTextureSampler(const ref<Sampler>& pSampler)
     {
         if (pSampler != mpDefaultSampler)
         {
@@ -273,16 +272,16 @@ namespace Falcor
             // Create derived samplers for displacement Min/Max filtering.
             Sampler::Desc desc = pSampler->getDesc();
             desc.setMaxAnisotropy(16); // Set 16x anisotropic filtering for improved min/max precision per triangle.
-            desc.setReductionMode(Sampler::ReductionMode::Min);
-            mpDisplacementMinSampler = Sampler::create(desc);
-            desc.setReductionMode(Sampler::ReductionMode::Max);
-            mpDisplacementMaxSampler = Sampler::create(desc);
+            desc.setReductionMode(TextureReductionMode::Min);
+            mpDisplacementMinSampler = mpDevice->createSampler(desc);
+            desc.setReductionMode(TextureReductionMode::Max);
+            mpDisplacementMaxSampler = mpDevice->createSampler(desc);
 
             markUpdates(UpdateFlags::ResourcesChanged);
         }
     }
 
-    bool BasicMaterial::setTexture(const TextureSlot slot, const Texture::SharedPtr& pTexture)
+    bool BasicMaterial::setTexture(const TextureSlot slot, const ref<Texture>& pTexture)
     {
         if (!Material::setTexture(slot, pTexture)) return false;
 
@@ -298,6 +297,10 @@ namespace Falcor
                 mIsTexturedBaseColorConstant = mIsTexturedAlphaConstant = false;
             }
             updateAlphaMode();
+            updateDeltaSpecularFlag();
+            break;
+        case TextureSlot::Specular:
+            updateDeltaSpecularFlag();
             break;
         case TextureSlot::Normal:
             updateNormalMapType();
@@ -339,12 +342,12 @@ namespace Falcor
             float4 baseColor = getBaseColor();
             if (isColorConstant)
             {
-                baseColor = float4(texInfo.value.rgb, baseColor.a);
+                baseColor = float4(texInfo.value.xyz(), baseColor.a);
                 mIsTexturedBaseColorConstant = true;
             }
             if (hasAlpha && isAlphaConstant)
             {
-                baseColor = float4(baseColor.rgb, texInfo.value.a);
+                baseColor = float4(baseColor.xyz(), texInfo.value.a);
                 mIsTexturedAlphaConstant = true;
             }
             setBaseColor(baseColor);
@@ -382,7 +385,7 @@ namespace Falcor
             if (texInfo.isConstant(channelMask))
             {
                 clearTexture(Material::TextureSlot::Emissive);
-                setEmissiveColor(texInfo.value.rgb);
+                setEmissiveColor(texInfo.value.xyz());
                 stats.texturesRemoved[(size_t)slot]++;
             }
             break;
@@ -417,7 +420,7 @@ namespace Falcor
             if (texInfo.isConstant(channelMask))
             {
                 clearTexture(Material::TextureSlot::Transmission);
-                setTransmissionColor(texInfo.value.rgb);
+                setTransmissionColor(texInfo.value.xyz());
                 stats.texturesRemoved[(size_t)slot]++;
             }
             break;
@@ -428,7 +431,7 @@ namespace Falcor
             break;
         }
         default:
-            throw ArgumentError("'slot' refers to unexpected texture slot {}", (uint32_t)slot);
+            FALCOR_THROW("'slot' refers to unexpected texture slot {}", (uint32_t)slot);
         }
     }
 
@@ -441,6 +444,8 @@ namespace Falcor
     {
         if (auto pDisplacementMap = getDisplacementMap(); pDisplacementMap && mDisplacementMapChanged)
         {
+            RenderContext* pRenderContext = mpDevice->getRenderContext();
+
             // Creates RGBA texture with MIP pyramid containing average, min, max values.
             Falcor::ResourceFormat oldFormat = pDisplacementMap->getFormat();
 
@@ -448,19 +453,18 @@ namespace Falcor
             if (getFormatChannelCount(oldFormat) < 4)
             {
                 Falcor::ResourceFormat newFormat = ResourceFormat::RGBA16Float;
-                Resource::BindFlags bf = pDisplacementMap->getBindFlags() | Resource::BindFlags::UnorderedAccess | Resource::BindFlags::RenderTarget;
-                Texture::SharedPtr newDisplacementTex = Texture::create2D(pDisplacementMap->getWidth(), pDisplacementMap->getHeight(), newFormat, pDisplacementMap->getArraySize(), Resource::kMaxPossible, nullptr, bf);
+                ResourceBindFlags bf = pDisplacementMap->getBindFlags() | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget;
+                ref<Texture> newDisplacementTex = mpDevice->createTexture2D(pDisplacementMap->getWidth(), pDisplacementMap->getHeight(), newFormat, pDisplacementMap->getArraySize(), Resource::kMaxPossible, nullptr, bf);
 
                 // Copy base level.
-                RenderContext* pContext = gpDevice->getRenderContext();
                 uint32_t arraySize = pDisplacementMap->getArraySize();
                 for (uint32_t a = 0; a < arraySize; a++)
                 {
                     auto srv = pDisplacementMap->getSRV(0, 1, a, 1);
                     auto rtv = newDisplacementTex->getRTV(0, a, 1);
-                    const Sampler::ReductionMode redModes[] = { Sampler::ReductionMode::Standard, Sampler::ReductionMode::Standard, Sampler::ReductionMode::Standard, Sampler::ReductionMode::Standard };
+                    const TextureReductionMode redModes[] = { TextureReductionMode::Standard, TextureReductionMode::Standard, TextureReductionMode::Standard, TextureReductionMode::Standard };
                     const float4 componentsTransform[] = { float4(1.0f, 0.0f, 0.0f, 0.0f), float4(1.0f, 0.0f, 0.0f, 0.0f), float4(1.0f, 0.0f, 0.0f, 0.0f), float4(1.0f, 0.0f, 0.0f, 0.0f) };
-                    pContext->blit(srv, rtv, RenderContext::kMaxRect, RenderContext::kMaxRect, Sampler::Filter::Linear, redModes, componentsTransform);
+                    pRenderContext->blit(srv, rtv, RenderContext::kMaxRect, RenderContext::kMaxRect, TextureFilteringMode::Linear, redModes, componentsTransform);
                 }
 
                 pDisplacementMap = newDisplacementTex;
@@ -468,7 +472,7 @@ namespace Falcor
             }
 
             // Build min/max MIPS.
-            pDisplacementMap->generateMips(gpDevice->getRenderContext(), true);
+            pDisplacementMap->generateMips(pRenderContext, true);
         }
         mDisplacementMapChanged = false;
     }
@@ -493,26 +497,28 @@ namespace Falcor
 
     void BasicMaterial::setBaseColor(const float4& color)
     {
-        if (mData.baseColor != (float16_t4)color)
+        if (any(mData.baseColor != (float16_t4)color))
         {
             mData.baseColor = (float16_t4)color;
             markUpdates(UpdateFlags::DataChanged);
             updateAlphaMode();
+            updateDeltaSpecularFlag();
         }
     }
 
     void BasicMaterial::setSpecularParams(const float4& color)
     {
-        if (mData.specular != (float16_t4)color)
+        if (any(mData.specular != (float16_t4)color))
         {
             mData.specular = (float16_t4)color;
             markUpdates(UpdateFlags::DataChanged);
+            updateDeltaSpecularFlag();
         }
     }
 
     void BasicMaterial::setTransmissionColor(const float3& transmissionColor)
     {
-        if (mData.transmission != (float16_t3)transmissionColor)
+        if (any(mData.transmission != (float16_t3)transmissionColor))
         {
             mData.transmission = (float16_t3)transmissionColor;
             markUpdates(UpdateFlags::DataChanged);
@@ -525,6 +531,7 @@ namespace Falcor
         {
             mData.diffuseTransmission = (float16_t)diffuseTransmission;
             markUpdates(UpdateFlags::DataChanged);
+            updateDeltaSpecularFlag();
         }
     }
 
@@ -534,12 +541,13 @@ namespace Falcor
         {
             mData.specularTransmission = (float16_t)specularTransmission;
             markUpdates(UpdateFlags::DataChanged);
+            updateDeltaSpecularFlag();
         }
     }
 
     void BasicMaterial::setVolumeAbsorption(const float3& volumeAbsorption)
     {
-        if (mData.volumeAbsorption != (float16_t3)volumeAbsorption)
+        if (any(mData.volumeAbsorption != (float16_t3)volumeAbsorption))
         {
             mData.volumeAbsorption = (float16_t3)volumeAbsorption;
             markUpdates(UpdateFlags::DataChanged);
@@ -548,7 +556,7 @@ namespace Falcor
 
     void BasicMaterial::setVolumeScattering(const float3& volumeScattering)
     {
-        if (mData.volumeScattering != (float16_t3)volumeScattering)
+        if (any(mData.volumeScattering != (float16_t3)volumeScattering))
         {
             mData.volumeScattering = (float16_t3)volumeScattering;
             markUpdates(UpdateFlags::DataChanged);
@@ -557,7 +565,7 @@ namespace Falcor
 
     void BasicMaterial::setVolumeAnisotropy(float volumeAnisotropy)
     {
-        auto clampedAnisotropy = clamp(volumeAnisotropy, -kMaxVolumeAnisotropy, kMaxVolumeAnisotropy);
+        auto clampedAnisotropy = math::clamp(volumeAnisotropy, -kMaxVolumeAnisotropy, kMaxVolumeAnisotropy);
         if (mData.volumeAnisotropy != (float16_t)clampedAnisotropy)
         {
             mData.volumeAnisotropy = (float16_t)clampedAnisotropy;
@@ -565,9 +573,9 @@ namespace Falcor
         }
     }
 
-    bool BasicMaterial::isEqual(const Material::SharedPtr& pOther) const
+    bool BasicMaterial::isEqual(const ref<Material>& pOther) const
     {
-        auto other = std::dynamic_pointer_cast<BasicMaterial>(pOther);
+        auto other = dynamic_ref_cast<BasicMaterial>(pOther);
         if (!other) return false;
 
         return (*this) == (*other);
@@ -578,21 +586,22 @@ namespace Falcor
         if (!isBaseEqual(other)) return false;
 
 #define compare_field(_a) if (mData._a != other.mData._a) return false
+#define compare_vec_field(_a) if (any(mData._a != other.mData._a)) return false
         compare_field(flags);
         compare_field(displacementScale);
         compare_field(displacementOffset);
-        compare_field(baseColor);
-        compare_field(specular);
-        compare_field(emissive);
+        compare_vec_field(baseColor);
+        compare_vec_field(specular);
+        compare_vec_field(emissive);
         compare_field(emissiveFactor);
-        compare_field(IoR);
         compare_field(diffuseTransmission);
         compare_field(specularTransmission);
-        compare_field(transmission);
-        compare_field(volumeAbsorption);
+        compare_vec_field(transmission);
+        compare_vec_field(volumeAbsorption);
         compare_field(volumeAnisotropy);
-        compare_field(volumeScattering);
+        compare_vec_field(volumeScattering);
 #undef compare_field
+#undef compare_vec_field
 
         // Compare the sampler descs directly to identify functional differences.
         if (mpDefaultSampler->getDesc() != other.mpDefaultSampler->getDesc()) return false;
@@ -628,25 +637,7 @@ namespace Falcor
 
     void BasicMaterial::updateNormalMapType()
     {
-        NormalMapType type = NormalMapType::None;
-
-        if (auto pNormalMap = getNormalMap())
-        {
-            switch (getFormatChannelCount(pNormalMap->getFormat()))
-            {
-            case 2:
-                type = NormalMapType::RG;
-                break;
-            case 3:
-            case 4: // Some texture formats don't support RGB, only RGBA. We have no use for the alpha channel in the normal map.
-                type = NormalMapType::RGB;
-                break;
-            default:
-                FALCOR_UNREACHABLE();
-                logWarning("Unsupported normal map format for material '{}'.", mName);
-            }
-        }
-
+        NormalMapType type = detectNormalMapType(getNormalMap());
         if (mData.getNormalMapType() != type)
         {
             mData.setNormalMapType(type);
@@ -659,12 +650,12 @@ namespace Falcor
         bool isEmissive = false;
         if (mData.emissiveFactor > 0.f)
         {
-            isEmissive = hasTextureSlotData(Material::TextureSlot::Emissive) || (float3)mData.emissive != float3(0.f);
+            isEmissive = hasTextureSlotData(Material::TextureSlot::Emissive) || any(mData.emissive != float3(0.f));
         }
         if (mHeader.isEmissive() != isEmissive)
         {
             mHeader.setEmissive(isEmissive);
-            markUpdates(UpdateFlags::DataChanged);
+            markUpdates(UpdateFlags::DataChanged | UpdateFlags::EmissiveChanged);
         }
     }
 
@@ -686,7 +677,7 @@ namespace Falcor
     {
         FALCOR_SCRIPT_BINDING_DEPENDENCY(Material)
 
-        pybind11::class_<BasicMaterial, Material, BasicMaterial::SharedPtr> material(m, "BasicMaterial");
+        pybind11::class_<BasicMaterial, Material, ref<BasicMaterial>> material(m, "BasicMaterial");
         material.def_property("baseColor", &BasicMaterial::getBaseColor, &BasicMaterial::setBaseColor);
         material.def_property("specularParams", &BasicMaterial::getSpecularParams, &BasicMaterial::setSpecularParams);
         material.def_property("transmissionColor", &BasicMaterial::getTransmissionColor, &BasicMaterial::setTransmissionColor);

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,10 +25,10 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "HitInfo.h"
 #include "HitInfoType.slang"
 #include "Scene.h"
+#include "Utils/Logger.h"
 
 namespace Falcor
 {
@@ -62,19 +62,19 @@ namespace Falcor
 
         uint32_t maxPrimitiveCount = 0;
 
-        for (uint32_t meshID = 0; meshID < scene.getMeshCount(); meshID++)
+        for (MeshID meshID{ 0 }; meshID.get() < scene.getMeshCount(); ++meshID)
         {
             uint32_t triangleCount = scene.getMesh(meshID).getTriangleCount();
             maxPrimitiveCount = std::max(maxPrimitiveCount, triangleCount);
         }
-        for (uint32_t curveID = 0; curveID < scene.getCurveCount(); curveID++)
+        for (CurveID curveID{ 0 }; curveID.get() < scene.getCurveCount(); ++curveID)
         {
             uint32_t curveSegmentCount = scene.getCurve(curveID).getSegmentCount();
             maxPrimitiveCount = std::max(maxPrimitiveCount, curveSegmentCount);
         }
 
         mPrimitiveIndexBits = allocateBits(maxPrimitiveCount);
-        for (uint32_t sdfID = 0; sdfID < scene.getSDFGridCount(); sdfID++)
+        for (SdfGridID sdfID{ 0 } ; sdfID.get() < scene.getSDFGridCount(); ++sdfID)
         {
             uint32_t sdfGridMaxPrimitiveIDBits = scene.getSDFGrid(sdfID)->getMaxPrimitiveIDBits();
             mPrimitiveIndexBits = std::max(mPrimitiveIndexBits, sdfGridMaxPrimitiveIDBits);
@@ -83,7 +83,7 @@ namespace Falcor
         // Check that the final bit allocation fits.
         if (mPrimitiveIndexBits > 32 || (mTypeBits + mInstanceIDBits) > 32)
         {
-            throw RuntimeError("Scene requires > 64 bits for encoding hit info header. This is currently not supported.");
+            FALCOR_THROW("Scene requires > 64 bits for encoding hit info header. This is currently not supported.");
         }
 
         // Compute size of compressed header in bits.
@@ -105,10 +105,10 @@ namespace Falcor
 
     }
 
-    Shader::DefineList HitInfo::getDefines() const
+    DefineList HitInfo::getDefines() const
     {
         FALCOR_ASSERT((mTypeBits + mInstanceIDBits) <= 32 && mPrimitiveIndexBits <= 32);
-        Shader::DefineList defines;
+        DefineList defines;
         defines.add("HIT_INFO_DEFINES", "1");
         defines.add("HIT_INFO_USE_COMPRESSION", mUseCompression ? "1" : "0");
         defines.add("HIT_INFO_TYPE_BITS", std::to_string(mTypeBits));

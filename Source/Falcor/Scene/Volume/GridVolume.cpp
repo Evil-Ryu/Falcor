@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,8 +25,13 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "GridVolume.h"
+#include "Grid.h"
+#include "Core/API/Device.h"
+#include "Utils/Logger.h"
+#include "Utils/Scripting/ScriptBindings.h"
+#include "GlobalState.h"
+#include <set>
 #include <filesystem>
 
 namespace Falcor
@@ -48,15 +53,12 @@ namespace Falcor
 
     static_assert(sizeof(GridVolumeData) % 16 == 0, "GridVolumeData size should be a multiple of 16");
 
-    GridVolume::GridVolume(const std::string& name) : mName(name)
+    GridVolume::GridVolume(ref<Device> pDevice, const std::string& name)
+        : mpDevice(pDevice)
+        , mName(name)
     {
-        mData.transform = glm::identity<glm::mat4>();
-        mData.invTransform = glm::identity<glm::mat4>();
-    }
-
-    GridVolume::SharedPtr GridVolume::create(const std::string& name)
-    {
-        return SharedPtr(new GridVolume(name));
+        mData.transform = float4x4::identity();
+        mData.invTransform = float4x4::identity();
     }
 
     bool GridVolume::renderUI(Gui::Widgets& widget)
@@ -118,32 +120,38 @@ namespace Falcor
 
     bool GridVolume::loadGrid(GridSlot slot, const std::filesystem::path& path, const std::string& gridname)
     {
-        auto grid = Grid::createFromFile(path, gridname);
+        auto grid = Grid::createFromFile(mpDevice, path, gridname);
         if (grid) setGrid(slot, grid);
         return grid != nullptr;
     }
 
-    uint32_t GridVolume::loadGridSequence(GridSlot slot, const std::vector<std::filesystem::path>& paths, const std::string& gridname, bool keepEmpty)
+    GridVolume::GridSequence GridVolume::createGridSequence(ref<Device> pDevice, const std::vector<std::filesystem::path>& paths, const std::string& gridname, bool keepEmpty)
     {
         GridSequence grids;
         for (const auto& path : paths)
         {
-            auto grid = Grid::createFromFile(path, gridname);
+            auto grid = Grid::createFromFile(pDevice, path, gridname);
             if (keepEmpty || grid) grids.push_back(grid);
         }
+
+        return grids;
+    }
+
+    uint32_t GridVolume::loadGridSequence(GridSlot slot, const std::vector<std::filesystem::path>& paths, const std::string& gridname, bool keepEmpty)
+    {
+        GridVolume::GridSequence grids = GridVolume::createGridSequence(mpDevice, paths, gridname, keepEmpty);
         setGridSequence(slot, grids);
         return (uint32_t)grids.size();
     }
 
     uint32_t GridVolume::loadGridSequence(GridSlot slot, const std::filesystem::path& path, const std::string& gridname, bool keepEmpty)
     {
-        std::filesystem::path fullPath;
-        if (!findFileInDataDirectories(path, fullPath))
+        if (!std::filesystem::exists(path))
         {
-            logWarning("Cannot find directory '{}'.", path);
+            logWarning("'{}' does not exist.", path);
             return 0;
         }
-        if (!std::filesystem::is_directory(fullPath))
+        if (!std::filesystem::is_directory(path))
         {
             logWarning("'{}' is not a directory.", path);
             return 0;
@@ -151,10 +159,9 @@ namespace Falcor
 
         // Enumerate grid files.
         std::vector<std::filesystem::path> paths;
-        for (auto p : std::filesystem::directory_iterator(fullPath))
+        for (auto it : std::filesystem::directory_iterator(path))
         {
-            const auto& path = p.path();
-            if (hasExtension(path, "nvdb") || hasExtension(path, "vdb")) paths.push_back(path);
+            if (hasExtension(it.path(), "nvdb") || hasExtension(it.path(), "vdb")) paths.push_back(it.path());
         }
 
         // Sort by length first, then alpha-numerically.
@@ -190,14 +197,14 @@ namespace Falcor
         return mGrids[slotIndex];
     }
 
-    void GridVolume::setGrid(GridSlot slot, const Grid::SharedPtr& grid)
+    void GridVolume::setGrid(GridSlot slot, const ref<Grid>& grid)
     {
         setGridSequence(slot, grid ? GridSequence{grid} : GridSequence{});
     }
 
-    const Grid::SharedPtr& GridVolume::getGrid(GridSlot slot) const
+    const ref<Grid>& GridVolume::getGrid(GridSlot slot) const
     {
-        static const Grid::SharedPtr kNullGrid;
+        static const ref<Grid> kNullGrid;
 
         uint32_t slotIndex = (uint32_t)slot;
         FALCOR_ASSERT(slotIndex >= 0 && slotIndex < (uint32_t)GridSlot::Count);
@@ -207,14 +214,14 @@ namespace Falcor
         return gridSequence.empty() ? kNullGrid : gridSequence[gridIndex];
     }
 
-    std::vector<Grid::SharedPtr> GridVolume::getAllGrids() const
+    std::vector<ref<Grid>> GridVolume::getAllGrids() const
     {
-        std::set<Grid::SharedPtr> uniqueGrids;
+        std::set<ref<Grid>> uniqueGrids;
         for (const auto& grids : mGrids)
         {
             std::copy_if(grids.begin(), grids.end(), std::inserter(uniqueGrids, uniqueGrids.begin()), [] (const auto& grid) { return grid != nullptr; });
         }
-        return std::vector<Grid::SharedPtr>(uniqueGrids.begin(), uniqueGrids.end());
+        return std::vector<ref<Grid>>(uniqueGrids.begin(), uniqueGrids.end());
     }
 
     void GridVolume::setGridFrame(uint32_t gridFrame)
@@ -229,7 +236,7 @@ namespace Falcor
 
     void GridVolume::setFrameRate(double frameRate)
     {
-        mFrameRate = clamp(frameRate, kMinFrameRate, kMaxFrameRate);
+        mFrameRate = math::clamp(frameRate, kMinFrameRate, kMaxFrameRate);
     }
 
     void GridVolume::setPlaybackEnabled(bool enabled)
@@ -239,10 +246,9 @@ namespace Falcor
 
     void GridVolume::updatePlayback(double currentTime)
     {
-        uint32_t frameCount = getGridFrameCount();
-        if (mPlaybackEnabled && frameCount > 0)
+        if (mPlaybackEnabled && mGridFrameCount > 0)
         {
-            uint32_t frameIndex = (uint32_t)std::floor(std::max(0.0, currentTime) * mFrameRate) % frameCount;
+            uint32_t frameIndex = (mStartFrame + (uint32_t)std::floor(std::max(0.0, currentTime) * mFrameRate)) % mGridFrameCount;
             setGridFrame(frameIndex);
         }
     }
@@ -268,7 +274,7 @@ namespace Falcor
     void GridVolume::setAlbedo(const float3& albedo)
     {
         auto clampedAlbedo = clamp(albedo, float3(0.f), float3(1.f));
-        if (mData.albedo != clampedAlbedo)
+        if (any(mData.albedo != clampedAlbedo))
         {
             mData.albedo = clampedAlbedo;
             markUpdates(UpdateFlags::PropertiesChanged);
@@ -277,7 +283,7 @@ namespace Falcor
 
     void GridVolume::setAnisotropy(float anisotropy)
     {
-        auto clampedAnisotropy = clamp(anisotropy, -kMaxAnisotropy, kMaxAnisotropy);
+        auto clampedAnisotropy = math::clamp(anisotropy, -kMaxAnisotropy, kMaxAnisotropy);
         if (mData.anisotropy != clampedAnisotropy)
         {
             mData.anisotropy = clampedAnisotropy;
@@ -308,12 +314,12 @@ namespace Falcor
         }
     }
 
-    void GridVolume::updateFromAnimation(const glm::mat4& transform)
+    void GridVolume::updateFromAnimation(const float4x4& transform)
     {
         if (mData.transform != transform)
         {
             mData.transform = transform;
-            mData.invTransform = glm::inverse(transform);
+            mData.invTransform = inverse(transform);
             markUpdates(UpdateFlags::TransformChanged);
             updateBounds();
         }
@@ -361,14 +367,26 @@ namespace Falcor
 
     FALCOR_SCRIPT_BINDING(GridVolume)
     {
+        using namespace pybind11::literals;
+
         FALCOR_SCRIPT_BINDING_DEPENDENCY(Animatable)
         FALCOR_SCRIPT_BINDING_DEPENDENCY(Grid)
 
-        pybind11::class_<GridVolume, Animatable, GridVolume::SharedPtr> volume(m, "GridVolume");
+        pybind11::class_<GridVolume, Animatable, ref<GridVolume>> volume(m, "GridVolume");
+
+        pybind11::enum_<GridVolume::GridSlot> gridSlot(volume, "GridSlot");
+        gridSlot.value("Density", GridVolume::GridSlot::Density);
+        gridSlot.value("Emission", GridVolume::GridSlot::Emission);
+
+        pybind11::enum_<GridVolume::EmissionMode> emissionMode(volume, "EmissionMode");
+        emissionMode.value("Direct", GridVolume::EmissionMode::Direct);
+        emissionMode.value("Blackbody", GridVolume::EmissionMode::Blackbody);
+
         volume.def_property("name", &GridVolume::getName, &GridVolume::setName);
         volume.def_property("gridFrame", &GridVolume::getGridFrame, &GridVolume::setGridFrame);
         volume.def_property_readonly("gridFrameCount", &GridVolume::getGridFrameCount);
         volume.def_property("frameRate", &GridVolume::getFrameRate, &GridVolume::setFrameRate);
+        volume.def_property("startFrame", &GridVolume::getStartFrame, &GridVolume::setStartFrame);
         volume.def_property("playbackEnabled", &GridVolume::isPlaybackEnabled, &GridVolume::setPlaybackEnabled);
         volume.def_property("densityGrid", &GridVolume::getDensityGrid, &GridVolume::setDensityGrid);
         volume.def_property("densityScale", &GridVolume::getDensityScale, &GridVolume::setDensityScale);
@@ -378,22 +396,31 @@ namespace Falcor
         volume.def_property("anisotropy", &GridVolume::getAnisotropy, &GridVolume::setAnisotropy);
         volume.def_property("emissionMode", &GridVolume::getEmissionMode, &GridVolume::setEmissionMode);
         volume.def_property("emissionTemperature", &GridVolume::getEmissionTemperature, &GridVolume::setEmissionTemperature);
-        volume.def(pybind11::init(&GridVolume::create), "name"_a);
-        volume.def("loadGrid", &GridVolume::loadGrid, "slot"_a, "path"_a, "gridname"_a);
+        auto create = [] (const std::string& name)
+        {
+            return GridVolume::create(accessActivePythonSceneBuilder().getDevice(), name);
+        };
+        volume.def(pybind11::init(create), "name"_a); // PYTHONDEPRECATED
+        volume.def("loadGrid",
+            [](GridVolume& self, GridVolume::GridSlot slot, const std::filesystem::path& path, const std::string& gridname)
+            { return self.loadGrid(slot, getActiveAssetResolver().resolvePath(path), gridname); },
+            "slot"_a, "path"_a, "gridname"_a
+        ); // PYTHONDEPRECATED
         volume.def("loadGridSequence",
-            pybind11::overload_cast<GridVolume::GridSlot, const std::vector<std::filesystem::path>&, const std::string&, bool>(&GridVolume::loadGridSequence),
-            "slot"_a, "paths"_a, "gridname"_a, "keepEmpty"_a = true);
+            [](GridVolume& self, GridVolume::GridSlot slot, const std::vector<std::filesystem::path>& paths, const std::string& gridname, bool keepEmpty)
+            {
+                std::vector<std::filesystem::path> resolvedPaths;
+                for (const auto& path : paths)
+                    resolvedPaths.push_back(getActiveAssetResolver().resolvePath(path));
+                return self.loadGridSequence(slot, resolvedPaths, gridname, keepEmpty);
+            },
+            "slot"_a, "paths"_a, "gridname"_a, "keepEmpty"_a = true
+        ); // PYTHONDEPRECATED
         volume.def("loadGridSequence",
-            pybind11::overload_cast<GridVolume::GridSlot, const std::filesystem::path&, const std::string&, bool>(&GridVolume::loadGridSequence),
-            "slot"_a, "path"_a, "gridnames"_a, "keepEmpty"_a = true);
-
-        pybind11::enum_<GridVolume::GridSlot> gridSlot(volume, "GridSlot");
-        gridSlot.value("Density", GridVolume::GridSlot::Density);
-        gridSlot.value("Emission", GridVolume::GridSlot::Emission);
-
-        pybind11::enum_<GridVolume::EmissionMode> emissionMode(volume, "EmissionMode");
-        emissionMode.value("Direct", GridVolume::EmissionMode::Direct);
-        emissionMode.value("Blackbody", GridVolume::EmissionMode::Blackbody);
+            [](GridVolume& self, GridVolume::GridSlot slot, const std::filesystem::path& path, const std::string& gridname, bool keepEmpty)
+            { return self.loadGridSequence(slot, getActiveAssetResolver().resolvePath(path), gridname, keepEmpty); },
+            "slot"_a, "path"_a, "gridnames"_a, "keepEmpty"_a = true
+        ); // PYTHONDEPRECATED
 
         m.attr("Volume") = m.attr("GridVolume"); // PYTHONDEPRECATED
     }

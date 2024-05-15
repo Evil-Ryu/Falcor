@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@ import Scene.Raster;
 import Utils.Math.MathHelpers;
 
 RasterizerOrderedTexture2D<float2> gMotionVector;
+RasterizerOrderedTexture2D<float> gMask;
 
 cbuffer PerFrameCB
 {
@@ -47,10 +48,10 @@ struct VBufferVSOut
     float2 texC : TEXCRD;
 
     // Per-triangle data
-    nointerpolation GeometryInstanceID instanceID   : INSTANCE_ID;
-    nointerpolation uint materialID                 : MATERIAL_ID;
+    nointerpolation GeometryInstanceID instanceID : INSTANCE_ID;
+    nointerpolation uint materialID : MATERIAL_ID;
 
-    float4 posH : SV_POSITION;  ///< Position in world space.
+    float4 posH : SV_POSITION; ///< Position in world space.
 
 #if is_valid(gMotionVector)
     float4 prevPosH : PREVPOSH; ///< Position in clip space for the previous frame.
@@ -63,8 +64,8 @@ VBufferVSOut vsMain(VSIn vsIn)
     const GeometryInstanceID instanceID = { vsIn.instanceID };
 
     float4x4 worldMat = gScene.getWorldMatrix(instanceID);
-    float3 posW = mul(float4(vsIn.pos, 1.f), worldMat).xyz;
-    vsOut.posH = mul(float4(posW, 1.f), gScene.camera.getViewProj());
+    float3 posW = mul(worldMat, float4(vsIn.pos, 1.f)).xyz;
+    vsOut.posH = mul(gScene.camera.getViewProj(), float4(posW, 1.f));
 
     vsOut.texC = vsIn.texC;
     vsOut.instanceID = instanceID;
@@ -79,14 +80,14 @@ VBufferVSOut vsMain(VSIn vsIn)
         uint prevVertexIndex = gScene.meshes[instance.geometryID].prevVbOffset + vsIn.vertexID;
         prevPos = gScene.prevVertices[prevVertexIndex].position;
     }
-    float3 prevPosW = mul(float4(prevPos, 1.f), gScene.getPrevWorldMatrix(instanceID)).xyz;
-    vsOut.prevPosH = mul(float4(prevPosW, 1.f), gScene.camera.data.prevViewProjMatNoJitter);
+    float3 prevPosW = mul(gScene.getPrevWorldMatrix(instanceID), float4(prevPos, 1.f)).xyz;
+    vsOut.prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(prevPosW, 1.f));
 #endif
 
     return vsOut;
 }
 
-VBufferPSOut psMain(VBufferVSOut vsOut, uint triangleIndex : SV_PrimitiveID, float3 barycentrics : SV_Barycentrics)
+VBufferPSOut psMain(VBufferVSOut vsOut, uint triangleIndex: SV_PrimitiveID, float3 barycentrics: SV_Barycentrics)
 {
     VBufferPSOut psOut;
 
@@ -101,8 +102,12 @@ VBufferPSOut psMain(VBufferVSOut vsOut, uint triangleIndex : SV_PrimitiveID, flo
     v.texC = vsOut.texC;
     float lod = 0.f;
 
-    if (gScene.materials.alphaTest(v, vsOut.materialID, lod)) discard;
+    if (gScene.materials.alphaTest(v, vsOut.materialID, lod))
+        discard;
 #endif
+
+    if (is_valid(gMask))
+        gMask[ipos] = 1.f;
 
     // Note on barycentrics:
     // The barycentric weights provided to pixel shader correspond to vertices A, B, C of the rasterized triangle.
@@ -121,9 +126,12 @@ VBufferPSOut psMain(VBufferVSOut vsOut, uint triangleIndex : SV_PrimitiveID, flo
 #if is_valid(gMotionVector)
     // Compute motion vector.
     {
-        const float2 pixelPos = ipos + float2(0.5, 0.5); // Current sample in pixel coords.
-        const float4 prevPosH = vsOut.prevPosH; // Sample in previous frame in clip space coords, no jittering applied.
-        const float2 mv = calcMotionVector(pixelPos, prevPosH, gFrameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
+        // Current sample in pixel coords.
+        const float2 pixelPos = ipos + float2(0.5, 0.5);
+        // Sample in previous frame in clip space coords, no jittering applied.
+        const float4 prevPosH = vsOut.prevPosH;
+        // Remove camera jitter from motion vector
+        const float2 mv = calcMotionVector(pixelPos, prevPosH, gFrameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY);
         gMotionVector[ipos] = mv;
     }
 #endif

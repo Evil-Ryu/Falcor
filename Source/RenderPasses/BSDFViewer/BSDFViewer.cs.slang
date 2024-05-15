@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -52,23 +52,25 @@ struct BSDFViewer
         float3 wo;
     };
 
-    /** Get normalized viewport coordinate.
-        The viewport is centered on the image with square aspect and height 1.0. The y-axis points down.
-        TODO: Change to a more standard definition.
-        \return Viewport coordinate.
-    */
+    /**
+     * Get normalized viewport coordinate.
+     * The viewport is centered on the image with square aspect and height 1.0. The y-axis points down.
+     * TODO: Change to a more standard definition.
+     * @return Viewport coordinate.
+     */
     float2 getViewportCoord(uint2 pixel)
     {
         float2 p = pixel + float2(0.5f);
         return (p - params.viewportOffset) * params.viewportScale;
     }
 
-    /** Setup geometric frame of reference for BSDF slice.
-        \param[in] uv Viewport coordinate in [0,1].
-        \param[out] v Interpolated attributes for the point on the sphere.
-        \param[out] viewDir View direction.
-        \return Normalized incident direction (light vector).
-    */
+    /**
+     * Setup geometric frame of reference for BSDF slice.
+     * @param[in] uv Viewport coordinate in [0,1].
+     * @param[out] v Interpolated attributes for the point on the sphere.
+     * @param[out] viewDir View direction.
+     * @return Normalized incident direction (light vector).
+     */
     float3 calculateSliceGeometry(float2 uv, out VertexData v, out float3 viewDir)
     {
         // Setup local surface frame as T,B,N.
@@ -85,7 +87,7 @@ struct BSDFViewer
         float theta_d = (1.f - uv.y) * (M_PI / 2);
 
         float NdotH = cos(theta_h);
-        float HdotL = cos(theta_d);     // Note: HdotL = HdotV
+        float HdotL = cos(theta_d); // Note: HdotL = HdotV
 
         // Place the H vector at (0,0,1) to start.
         // Compute L, V that are mirrored about the yz-plane.
@@ -103,14 +105,18 @@ struct BSDFViewer
         return normalize(L);
     }
 
-    /** Calculate sphere geometry for the given viewport coordinate.
-        \param[in] uv Viewport coordinate in [0,1].
-        \param[out] v Interpolated attributes for the point on the sphere (if hit).
-        \param[out] rayDir Ray direction for the camera ray (normalized).
-        \return True if we're on the sphere.
-    */
+    /**
+     * Calculate sphere geometry for the given viewport coordinate.
+     * @param[in] uv Viewport coordinate in [0,1].
+     * @param[out] v Interpolated attributes for the point on the sphere (if hit).
+     * @param[out] rayDir Ray direction for the camera ray (normalized).
+     * @return True if we're on the sphere.
+     */
     bool calculateSphereGeometry(float2 uv, out VertexData v, out float3 rayDir)
     {
+        v = {};
+        rayDir = {};
+
         const float2 ndc = float2(2.f * uv.x - 1.f, -2.f * uv.y + 1.f);
 
         if (params.orthographicCamera)
@@ -121,7 +127,8 @@ struct BSDFViewer
             float d = 1.f - p.x * p.x - p.y * p.y;
             rayDir = float3(0, 0, -1);
 
-            if (d < 0.f) return false;
+            if (d < 0.f)
+                return false;
             p.z = sqrt(d);
             v.posW = p;
         }
@@ -133,7 +140,8 @@ struct BSDFViewer
             rayDir = normalize(target - origin);
 
             float t;
-            if (!intersectRaySphere(origin, rayDir, float3(0.f), 1.f, t)) return false;
+            if (!intersectRaySphere(origin, rayDir, float3(0.f), 1.f, t))
+                return false;
             v.posW = origin + t * rayDir;
         }
 
@@ -159,40 +167,45 @@ struct BSDFViewer
         return true;
     }
 
-    /** Prepare SurfaceData struct with shading data.
-        All unused fields are initialized to their default values.
-    */
+    /**
+     * Prepare SurfaceData struct with shading data.
+     * All unused fields are initialized to their default values.
+     */
     SurfaceData prepareShadingData(const VertexData v, const float3 viewDir, const ITextureSampler lod)
     {
         SurfaceData data = {};
 
         // Setup Falcor's ShadingData based on the selected scene material and lobes.
-        data.sd = gScene.materials.prepareShadingData(v, params.materialID, viewDir, lod, params.useNormalMapping);
+        data.sd = gScene.materials.prepareShadingData(v, params.materialID, viewDir, lod);
         data.sd.mtl.setActiveLobes(getActiveLobes());
 
         return data;
     }
 
-    /** Returns the color to use for background pixels.
-        \param[in] uv Viewport coordinates.
-        \param[in] dir Normalized ray direction.
-    */
+    /**
+     * Returns the color to use for background pixels.
+     * @param[in] uv Viewport coordinates.
+     * @param[in] dir Normalized ray direction.
+     */
     float3 evalBackground(float2 uv, float3 dir)
     {
         if (params.useGroundPlane)
         {
             bool hitGround = params.orthographicCamera ? (uv.y >= 0.5f) : (dir.y < 0.f);
-            if (hitGround) return kGroundPlaneColor;
+            if (hitGround)
+                return kGroundPlaneColor;
         }
-        if (params.useDirectionalLight) return float3(0);
+        if (params.useDirectionalLight)
+            return float3(0);
 
         float3 L = params.useEnvMap ? envMap.eval(dir) : params.lightColor;
         return L * params.lightIntensity;
     }
 
-    /** Evaluates the incident lighting from a given direction.
-        If directional lighting is enabled, it can be assumed 'dir' is light's direction.
-    */
+    /**
+     * Evaluates the incident lighting from a given direction.
+     * If directional lighting is enabled, it can be assumed 'dir' is light's direction.
+     */
     float3 evalLighting(float3 dir)
     {
         if (params.useGroundPlane && dir.y < 0.f)
@@ -204,20 +217,24 @@ struct BSDFViewer
         return L * params.lightIntensity;
     }
 
-    /** Returns the BSDF lobe mask for the currently enabled lobes.
-    */
+    /**
+     * Returns the BSDF lobe mask for the currently enabled lobes.
+     */
     uint getActiveLobes()
     {
-        uint lobes = 0;
-        if (params.enableDiffuse) lobes |= (uint)LobeType::DiffuseReflection;
-        if (params.enableSpecular) lobes |= (uint)LobeType::SpecularReflection | (uint)LobeType::DeltaReflection;
+        uint lobeTypes = 0;
+        if (params.enableDiffuse)
+            lobeTypes |= (uint)LobeType::DiffuseReflection;
+        if (params.enableSpecular)
+            lobeTypes |= (uint)LobeType::SpecularReflection | (uint)LobeType::DeltaReflection;
         // TODO: Viewer doesn't support transmission lobes yet
-        return lobes;
+        return lobeTypes;
     }
 
-    /** Evaluates the BSDF slice for a given viewport coordinate.
-        \return Evaluated BSDF value.
-    */
+    /**
+     * Evaluates the BSDF slice for a given viewport coordinate.
+     * @return Evaluated BSDF value.
+     */
     float3 evalBSDFSlice(const float2 uv, const ITextureSampler lod, inout SurfaceData data, inout SampleGenerator sg)
     {
         // Calculate geometry and incident/outgoing directions.
@@ -230,75 +247,84 @@ struct BSDFViewer
         data.wo = lightDir;
 
         // Create BSDF instance.
-        let bsdf = gScene.materials.getBSDF(data.sd, lod);
-        data.bsdfProperties = bsdf.getProperties(data.sd);
+        uint hints = !params.useNormalMapping ? (uint)MaterialInstanceHints::DisableNormalMapping : 0;
+        let mi = gScene.materials.getMaterialInstance(data.sd, lod, hints);
+        data.bsdfProperties = mi.getProperties(data.sd);
 
         // Evaluate BSDF at shading point.
-        float3 f = bsdf.eval(data.sd, data.wo, sg);
+        float3 f = mi.eval(data.sd, data.wo, sg);
 
         // Remove cosine term if it's disabled in the viewer.
         if (!params.applyNdotL)
         {
-            float NdotL = dot(data.sd.N, data.wo);
+            float NdotL = dot(data.sd.frame.N, data.wo);
             f = NdotL > 0.f ? f / NdotL : float3(0);
         }
 
         return f;
     }
 
-    /** Samples the BSDF to evaluate incident illumination.
-        This is done differently depending on the configuration.
-        \param[in] sd Shading data.
-        \param[in] bsdf BSDF instance.
-        \param[in,out] sg Sample generator.
-        \param[out] s Generated sample. Only valid if true is returned.
-        \return True if a sample was generated, false otherwise.
-    */
-    bool generateBSDFSample(const ShadingData sd, const IBSDF bsdf, inout SampleGenerator sg, out BSDFSample s)
+    /**
+     * Samples the BSDF to evaluate incident illumination.
+     * This is done differently depending on the configuration.
+     * @param[in] sd Shading data.
+     * @param[in] mi BSDF instance.
+     * @param[in,out] sg Sample generator.
+     * @param[out] s Generated sample. Only valid if true is returned.
+     * @return True if a sample was generated, false otherwise.
+     */
+    bool generateBSDFSample(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, out BSDFSample s)
     {
         if (params.useDirectionalLight)
         {
             // With directional light, disable BSDF sampling and just return a sample in the light's direction.
             s.wo = -normalize(params.lightDir);
-            s.weight = bsdf.eval(sd, s.wo, sg);
+            s.weight = mi.eval(sd, s.wo, sg);
             s.pdf = 1.f;
-            return dot(sd.N, s.wo) > 0.f;
+            return dot(sd.frame.N, s.wo) > 0.f;
         }
         else
         {
-            return bsdf.sample(sd, sg, s, params.useImportanceSampling);
+            return mi.sample(sd, sg, s, params.useImportanceSampling);
         }
     }
 
     float3 getAlbedo(const BSDFProperties bsdfProperties)
     {
         float3 albedo = {};
-        if (params.outputAlbedo & (uint)AlbedoSelection::DiffuseReflection) albedo += bsdfProperties.diffuseReflectionAlbedo;
-        if (params.outputAlbedo & (uint)AlbedoSelection::DiffuseTransmission) albedo += bsdfProperties.diffuseTransmissionAlbedo;
-        if (params.outputAlbedo & (uint)AlbedoSelection::SpecularReflection) albedo += bsdfProperties.specularReflectionAlbedo;
-        if (params.outputAlbedo & (uint)AlbedoSelection::SpecularTransmission) albedo += bsdfProperties.specularTransmissionAlbedo;
+        if (params.outputAlbedo & (uint)AlbedoSelection::DiffuseReflection)
+            albedo += bsdfProperties.diffuseReflectionAlbedo;
+        if (params.outputAlbedo & (uint)AlbedoSelection::DiffuseTransmission)
+            albedo += bsdfProperties.diffuseTransmissionAlbedo;
+        if (params.outputAlbedo & (uint)AlbedoSelection::SpecularReflection)
+            albedo += bsdfProperties.specularReflectionAlbedo;
+        if (params.outputAlbedo & (uint)AlbedoSelection::SpecularTransmission)
+            albedo += bsdfProperties.specularTransmissionAlbedo;
         return albedo;
     }
 
-    /** Evaluates the lit sphere for a given viewport coordinate.
-        The viewport shows an analytic sphere of the specified material at infinite distance.
-        When each pixel is evaluated using a random light direction and omnidirectional white light,
-        the result converges to the total reflectance (integral of BSDF times the dot(N,L) factor.
-        \return Outgoing radiance value.
-    */
+    /**
+     * Evaluates the lit sphere for a given viewport coordinate.
+     * The viewport shows an analytic sphere of the specified material at infinite distance.
+     * When each pixel is evaluated using a random light direction and omnidirectional white light,
+     * the result converges to the total reflectance (integral of BSDF times the dot(N,L) factor.
+     * @return Outgoing radiance value.
+     */
     float3 evalSphere(const float2 uv, const ITextureSampler lod, inout SurfaceData data, inout SampleGenerator sg)
     {
         // Calculate the local surface frame.
         VertexData v;
         float3 rayDir;
-        if (!calculateSphereGeometry(uv, v, rayDir)) return evalBackground(uv, rayDir);
+        if (!calculateSphereGeometry(uv, v, rayDir))
+            return evalBackground(uv, rayDir);
 
         // Setup shading data.
         data = prepareShadingData(v, -rayDir, lod);
 
         // Create BSDF instance.
-        let bsdf = gScene.materials.getBSDF(data.sd, lod);
-        data.bsdfProperties = bsdf.getProperties(data.sd);
+        uint hints = !params.useNormalMapping ? (uint)MaterialInstanceHints::DisableNormalMapping : 0;
+        let mi = gScene.materials.getMaterialInstance(data.sd, lod, hints);
+        data.bsdfProperties = mi.getProperties(data.sd);
 
         float3 output = 0;
         if (params.outputAlbedo & (uint)AlbedoSelection::ShowAlbedo)
@@ -310,7 +336,7 @@ struct BSDFViewer
             // Sample BSDF at shading point.
             BSDFSample s = {};
 
-            if (generateBSDFSample(data.sd, bsdf, sg, s))
+            if (generateBSDFSample(data.sd, mi, sg, s))
             {
                 data.wo = s.wo;
                 float3 L = evalLighting(s.wo);
@@ -318,7 +344,7 @@ struct BSDFViewer
                 // Use computed pdf explicitly (for debugging).
                 if (params.usePdf)
                 {
-                    output = L * bsdf.eval(data.sd, s.wo, sg) / s.pdf;
+                    output = L * mi.eval(data.sd, s.wo, sg) / s.pdf;
                 }
                 else
                 {
@@ -330,11 +356,13 @@ struct BSDFViewer
         return output;
     }
 
-    /** BSDF viewer entry point.
-    */
+    /**
+     * BSDF viewer entry point.
+     */
     void execute(const uint2 pixel)
     {
-        if (any(pixel >= params.frameDim)) return;
+        if (any(pixel >= params.frameDim))
+            return;
 
         printSetPixel(pixel);
 
@@ -367,14 +395,15 @@ struct BSDFViewer
             PixelData px = {};
 
             px.texC = data.sd.uv;
-            px.N = data.sd.N;
-            px.T = data.sd.T;
-            px.B = data.sd.B;
+            px.N = data.sd.frame.N;
+            px.T = data.sd.frame.T;
+            px.B = data.sd.frame.B;
             px.wi = data.sd.V;
             px.wo = data.wo;
             px.output = output;
 
             // BSDF properties
+            px.guideNormal = data.bsdfProperties.guideNormal;
             px.emission = data.bsdfProperties.emission;
             px.roughness = data.bsdfProperties.roughness;
             px.diffuseReflectionAlbedo = data.bsdfProperties.diffuseReflectionAlbedo;
@@ -392,7 +421,7 @@ struct BSDFViewer
 ParameterBlock<BSDFViewer> gBSDFViewer;
 
 [numthreads(16, 16, 1)]
-void main(uint3 dispatchThreadID : SV_DispatchThreadID)
+void main(uint3 dispatchThreadID: SV_DispatchThreadID)
 {
     gBSDFViewer.execute(dispatchThreadID.xy);
 }

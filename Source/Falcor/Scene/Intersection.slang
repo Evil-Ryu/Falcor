@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@ import Scene.SDFs.SDFGrid;
 import Utils.Geometry.IntersectionHelpers;
 import Utils.Geometry.GeometryHelpers;
 __exported import Utils.Math.Ray;
+import Utils.Math.MatrixUtils;
 
 /** Helper for intersecting rays against displaced triangle meshes.
 */
@@ -54,6 +55,9 @@ struct DisplacedTriangleMeshIntersector
     */
     static bool intersect(const Ray ray, const GeometryInstanceID instanceID, const uint primitiveIndex, out Attribs attribs, out float t)
     {
+        attribs = {};
+        t = {};
+
         const uint materialID = gScene.getMaterialID(instanceID);
         const uint3 indices = gScene.getIndices(instanceID, primitiveIndex);
         const StaticVertexData vertices[3] = { gScene.getVertex(indices[0]), gScene.getVertex(indices[1]), gScene.getVertex(indices[2]) };
@@ -155,6 +159,9 @@ struct SDFGridIntersector
     */
     static bool intersect(const Ray ray, const GeometryInstanceID instanceID, const uint primitiveID, out SDFGridHitData hitData, out float t)
     {
+        hitData ={};
+        t = {};
+
         const GeometryInstanceData instance = gScene.getGeometryInstance(instanceID);
         SDFGrid sdfGrid;
         gScene.getSDFGrid(instanceID, sdfGrid);
@@ -164,8 +171,9 @@ struct SDFGridIntersector
         float3x3 worldInvTransposeMat = gScene.loadInverseTransposeWorldMatrix(instance.globalMatrixID);
 
         // Convert ray origin and direction to local space.
-        float3 rayOrigLocal = mul(worldInvTransposeMat, ray.origin - worldMat[3].xyz);
-        float3 rayDirLocal = mul(worldInvTransposeMat, ray.dir);
+        // Multiplying v.M to perform the intended (M^T).v
+        float3 rayOrigLocal = mul(ray.origin - extractTranslate(worldMat), worldInvTransposeMat);
+        float3 rayDirLocal = mul(ray.dir, worldInvTransposeMat);
 
         return sdfGrid.intersectSDF(rayOrigLocal, rayDirLocal, ray.tMin, ray.tMax, primitiveID, t, hitData);
     }
@@ -187,8 +195,9 @@ struct SDFGridIntersector
         float3x3 worldInvTransposeMat = gScene.loadInverseTransposeWorldMatrix(instance.globalMatrixID);
 
         // Convert ray origin and direction to local space.
-        float3 rayOrigLocal = mul(worldInvTransposeMat, ray.origin - worldMat[3].xyz);
-        float3 rayDirLocal = mul(worldInvTransposeMat, ray.dir);
+        // Multiplying v.M to perform the intended (M^T).v
+        float3 rayOrigLocal = mul(ray.origin - extractTranslate(worldMat), worldInvTransposeMat);
+        float3 rayDirLocal = mul(ray.dir, worldInvTransposeMat);
 
 #if SCENE_SDF_OPTIMIZE_VISIBILITY_RAYS
         return sdfGrid.intersectSDFAny(rayOrigLocal, rayDirLocal, ray.tMin, ray.tMax, primitiveID);

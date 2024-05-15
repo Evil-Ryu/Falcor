@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,20 +25,16 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
+#include "CrossFade/CrossFade.h"
 #include "Composite/Composite.h"
 #include "GaussianBlur/GaussianBlur.h"
 
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    return PROJECT_DIR;
-}
+    registry.registerClass<RenderPass, CrossFade>();
 
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
-{
-    lib.registerPass(Composite::kInfo, Composite::create);
-    ScriptBindings::registerBinding(Composite::registerBindings);
+    registry.registerClass<RenderPass, Composite>();
 
-    lib.registerPass(GaussianBlur::kInfo, GaussianBlur::create);
+    registry.registerClass<RenderPass, GaussianBlur>();
     ScriptBindings::registerBinding(GaussianBlur::registerBindings);
 }

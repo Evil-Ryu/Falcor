@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,8 +25,10 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "LightBVH.h"
+#include "Core/Error.h"
+#include "Core/API/RenderContext.h"
+#include "Utils/Timing/Profiler.h"
 
 namespace
 {
@@ -35,23 +37,26 @@ namespace
 
 namespace Falcor
 {
-    LightBVH::SharedPtr LightBVH::create(const LightCollection::SharedConstPtr& pLightCollection)
+    LightBVH::LightBVH(ref<Device> pDevice, const ref<const LightCollection>& pLightCollection)
+        : mpDevice(pDevice)
+        , mpLightCollection(pLightCollection)
     {
-        return SharedPtr(new LightBVH(pLightCollection));
+        mLeafUpdater = ComputePass::create(mpDevice, kShaderFile, "updateLeafNodes");
+        mInternalUpdater = ComputePass::create(mpDevice, kShaderFile, "updateInternalNodes");
     }
 
     // TODO: Only update the ones that moved.
     void LightBVH::refit(RenderContext* pRenderContext)
     {
-        FALCOR_PROFILE("LightBVH::refit()");
+        FALCOR_PROFILE(pRenderContext, "LightBVH::refit()");
 
         FALCOR_ASSERT(mIsValid);
 
         // Update all leaf nodes.
         {
-            auto var = mLeafUpdater->getVars()["CB"];
-            mpLightCollection->setShaderData(var["gLights"]);
-            setShaderData(var["gLightBVH"]);
+            auto var = mLeafUpdater->getRootVar()["CB"];
+            mpLightCollection->bindShaderData(var["gLights"]);
+            bindShaderData(var["gLightBVH"]);
             var["gNodeIndices"] = mpNodeIndicesBuffer;
 
             const uint32_t nodeCount = mPerDepthRefitEntryInfo.back().count;
@@ -64,9 +69,9 @@ namespace Falcor
 
         // Update all internal nodes.
         {
-            auto var = mInternalUpdater->getVars()["CB"];
-            mpLightCollection->setShaderData(var["gLights"]);
-            setShaderData(var["gLightBVH"]);
+            auto var = mInternalUpdater->getRootVar()["CB"];
+            mpLightCollection->bindShaderData(var["gLights"]);
+            bindShaderData(var["gLightBVH"]);
             var["gNodeIndices"] = mpNodeIndicesBuffer;
 
             // Note that mBVHStats.treeHeight may be 0, in which case there is a single leaf and no internal nodes.
@@ -134,12 +139,6 @@ namespace Falcor
         mBVHStats = BVHStats();
         mIsValid = false;
         mIsCpuDataValid = false;
-    }
-
-    LightBVH::LightBVH(const LightCollection::SharedConstPtr& pLightCollection) : mpLightCollection(pLightCollection)
-    {
-        mLeafUpdater = ComputePass::create(kShaderFile, "updateLeafNodes");
-        mInternalUpdater = ComputePass::create(kShaderFile, "updateInternalNodes");
     }
 
     void LightBVH::traverseBVH(const NodeFunction& evalInternal, const NodeFunction& evalLeaf, uint32_t rootNodeIndex)
@@ -263,7 +262,7 @@ namespace Falcor
 
         if (!mpNodeIndicesBuffer || mpNodeIndicesBuffer->getElementCount() < mNodeIndices.size())
         {
-            mpNodeIndicesBuffer = Buffer::createStructured(sizeof(uint32_t), (uint32_t)mNodeIndices.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, nullptr, false);
+            mpNodeIndicesBuffer = mpDevice->createStructuredBuffer(sizeof(uint32_t), (uint32_t)mNodeIndices.size(), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, nullptr, false);
             mpNodeIndicesBuffer->setName("LightBVH::mpNodeIndicesBuffer");
         }
 
@@ -276,17 +275,17 @@ namespace Falcor
         auto var = mLeafUpdater->getRootVar()["CB"]["gLightBVH"];
         if (!mpBVHNodesBuffer || mpBVHNodesBuffer->getElementCount() < mNodes.size())
         {
-            mpBVHNodesBuffer = Buffer::createStructured(var["nodes"], (uint32_t)mNodes.size(), Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
+            mpBVHNodesBuffer = mpDevice->createStructuredBuffer(var["nodes"], (uint32_t)mNodes.size(), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, MemoryType::DeviceLocal, nullptr, false);
             mpBVHNodesBuffer->setName("LightBVH::mpBVHNodesBuffer");
         }
         if (!mpTriangleIndicesBuffer || mpTriangleIndicesBuffer->getElementCount() < triangleIndices.size())
         {
-            mpTriangleIndicesBuffer = Buffer::createStructured(var["triangleIndices"], (uint32_t)triangleIndices.size(), Resource::BindFlags::ShaderResource, Buffer::CpuAccess::None, nullptr, false);
+            mpTriangleIndicesBuffer = mpDevice->createStructuredBuffer(var["triangleIndices"], (uint32_t)triangleIndices.size(), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, nullptr, false);
             mpTriangleIndicesBuffer->setName("LightBVH::mpTriangleIndicesBuffer");
         }
         if (!mpTriangleBitmasksBuffer || mpTriangleBitmasksBuffer->getElementCount() < triangleBitmasks.size())
         {
-            mpTriangleBitmasksBuffer = Buffer::createStructured(var["triangleBitmasks"], (uint32_t)triangleBitmasks.size(), Resource::BindFlags::ShaderResource, Buffer::CpuAccess::None, nullptr, false);
+            mpTriangleBitmasksBuffer = mpDevice->createStructuredBuffer(var["triangleBitmasks"], (uint32_t)triangleBitmasks.size(), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, nullptr, false);
             mpTriangleBitmasksBuffer->setName("LightBVH::mpTriangleBitmasksBuffer");
         }
 
@@ -310,14 +309,12 @@ namespace Falcor
 
         // TODO: This is slow because of the flush. We should copy to a staging buffer
         // after the data is updated on the GPU and map the staging buffer here instead.
-        const void* const ptr = mpBVHNodesBuffer->map(Buffer::MapType::Read);
         FALCOR_ASSERT(mNodes.size() > 0 && mNodes.size() <= mpBVHNodesBuffer->getElementCount());
-        std::memcpy(mNodes.data(), ptr, mNodes.size() * sizeof(mNodes[0]));
-        mpBVHNodesBuffer->unmap();
+        mpBVHNodesBuffer->getBlob(mNodes.data(), 0, mNodes.size() * sizeof(PackedNode));;
         mIsCpuDataValid = true;
     }
 
-    void LightBVH::setShaderData(const ShaderVar& var) const
+    void LightBVH::bindShaderData(const ShaderVar& var) const
     {
         if (isValid())
         {

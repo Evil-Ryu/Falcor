@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -80,8 +80,9 @@ TriangleHit getCandidateTriangleHit<let Flags : int>(RayQuery<Flags> rayQuery)
     return hit;
 }
 
+
 // TODO: Pass UseAlphaTest as a template argument.
-bool traceSceneRayImpl<let Flags : int>(const bool useAlphaTest, RayQuery<Flags> rayQuery, const Ray ray, out HitInfo hit, out float hitT, uint rayFlags, uint instanceInclusionMask)
+bool traceSceneRayImpl<let Flags : int>(const bool useAlphaTest, inout RayQuery<Flags> rayQuery, const Ray ray, out HitInfo hit, out float hitT, uint rayFlags, uint instanceInclusionMask)
 {
     rayQuery.TraceRayInline(gScene.rtAccel, rayFlags, instanceInclusionMask, ray.toRayDesc());
 
@@ -162,14 +163,13 @@ bool traceSceneRayImpl<let Flags : int>(const bool useAlphaTest, RayQuery<Flags>
     hit = {};
     hitT = 0.f;
 
-#if SCENE_HAS_GEOMETRY_TYPE(GEOMETRY_TYPE_TRIANGLE_MESH)
     if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
     {
         hit = HitInfo(getCommittedTriangleHit(rayQuery));
         hitT = rayQuery.CommittedRayT();
         return true;
     }
-#endif
+
 #if SCENE_HAS_PROCEDURAL_GEOMETRY()
     if (rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT)
     {
@@ -223,6 +223,7 @@ bool traceSceneRayImpl<let Flags : int>(const bool useAlphaTest, RayQuery<Flags>
     return false;
 }
 
+[__NoSideEffect] // Required for the performance of reverse-mode auto-diff.
 bool traceSceneRay<let UseAlphaTest : int>(const Ray ray, out HitInfo hit, out float hitT, uint rayFlags, uint instanceInclusionMask)
 {
     // TODO: Use a constant expression to derive static ray flags.
@@ -247,7 +248,8 @@ bool traceSceneRay<let UseAlphaTest : int>(const Ray ray, out HitInfo hit, out f
     }
 }
 
-bool traceSceneVisibilityRayImpl<let Flags : int>(const bool useAlphaTest, RayQuery<Flags> rayQuery, const Ray ray, uint rayFlags, uint instanceInclusionMask)
+[__NoSideEffect] // Required for the performance of reverse-mode auto-diff.
+bool traceSceneVisibilityRayImpl<let Flags : int>(const bool useAlphaTest, inout RayQuery<Flags> rayQuery, const Ray ray, uint rayFlags, uint instanceInclusionMask)
 {
     rayQuery.TraceRayInline(gScene.rtAccel, rayFlags, instanceInclusionMask, ray.toRayDesc());
 

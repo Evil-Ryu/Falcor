@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,8 +27,9 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "RenderGraph/RenderPass.h"
 #include "Core/Platform/MonitorInfo.h"
-#include "Utils/Algorithm/ComputeParallelReduction.h"
+#include "Utils/Algorithm/ParallelReduction.h"
 #include "ToneMappers.slang"
 
 using namespace Falcor;
@@ -36,59 +37,87 @@ using namespace Falcor;
 class FLIPPass : public RenderPass
 {
 public:
-    using SharedPtr = std::shared_ptr<FLIPPass>;
+    FALCOR_PLUGIN_CLASS(
+        FLIPPass,
+        "FLIPPass",
+        {"FLIP Metric Pass.\n\n"
+         "If the input has high dynamic range, check the \"Compute HDR-FLIP\" box below.\n\n"
+         "The errorMapDisplay shows the FLIP error map. "
+         "When HDR-FLIP is computed, the user may also show the HDR-FLIP exposure map.\n\n"
+         "When \"List all output\" is checked, the user may also store the errorMap. "
+         "This is a high-precision, linear buffer which is transformed to sRGB before display. "
+         "NOTE: This sRGB transform will make the displayed output look different compared "
+         "to the errorMapDisplay. The transform is only added before display, however, "
+         "and will NOT affect the output when it is saved to disk."}
+    );
 
-    static const Info kInfo;
+    static ref<FLIPPass> create(ref<Device> pDevice, const Properties& props) { return make_ref<FLIPPass>(pDevice, props); }
 
-    /** Create a new render pass object.
-        \param[in] pRenderContext The render context.
-        \param[in] dict Dictionary of serialized parameters.
-        \return A new object, or an exception is thrown if creation failed.
-    */
-    static SharedPtr create(RenderContext* pRenderContext = nullptr, const Dictionary& dict = {});
+    FLIPPass(ref<Device> pDevice, const Properties& props);
 
-    virtual Dictionary getScriptingDictionary() override;
+    virtual Properties getProperties() const override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
 
-    static void registerBindings(pybind11::module& m);
-
 protected:
     void updatePrograms();
     void computeExposureParameters(const float Ymedian, const float Ymax);
-    void parseDictionary(const Dictionary& dict);
+    void parseProperties(const Properties& props);
 
 private:
-    FLIPPass(const Dictionary& dict);
+    /// Enables FLIP calculation.
+    bool mEnabled = true;
 
-    bool                                mEnabled = true;                        ///< Enables FLIP calculation.
+    /// Enable to map FLIP result to magma colormap.
+    bool mUseMagma = true;
+    /// Enable to clamp FLIP input to the expected range ([0,1] for LDR-FLIP and [0, inf) for HDR-FLIP).
+    bool mClampInput = false;
+    /// Horizontal monitor resolution.
+    uint mMonitorWidthPixels;
+    /// Width of the monitor in meters.
+    float mMonitorWidthMeters;
+    /// Distance of monitor from the viewer in meters.
+    float mMonitorDistanceMeters;
 
-    bool                                mUseMagma = true;                       ///< Enable to map FLIP result to magma colormap.
-    bool                                mClampInput = false;                    ///< Enable to clamp FLIP input to the expected range ([0,1] for LDR-FLIP and [0, inf) for HDR-FLIP).
-    uint                                mMonitorWidthPixels;                    ///< Horizontal monitor resolution.
-    float                               mMonitorWidthMeters;                    ///< Width of the monitor in meters.
-    float                               mMonitorDistanceMeters;                 ///< Distance of monitor from the viewer in meters.
+    /// Enable to compute HDR-FLIP.
+    bool mIsHDR = false;
+    /// Enable to choose custom HDR-FLIP exposure parameters (start exposure, stop exposure, and number of exposures).
+    bool mUseCustomExposureParameters = false;
+    /// Mode for controlling adaptive sampling.
+    FLIPToneMapperType mToneMapper = FLIPToneMapperType::ACES;
+    /// Start exposure used for HDR-FLIP.
+    float mStartExposure = 0.0f;
+    /// Stop exposure used for HDR-FLIP.
+    float mStopExposure = 0.0f;
+    /// Exposure delta used for HDR-FLIP (startExposure + (numExposures - 1) * exposureDelta = stopExposure).
+    float mExposureDelta = 0.0f;
+    /// Number of exposures used for HDR-FLIP.
+    uint32_t mNumExposures = 2;
 
-    bool                                mIsHDR = false;                         ///< Enable to compute HDR-FLIP.
-    bool                                mUseCustomExposureParameters = false;   ///< Enable to choose custom HDR-FLIP exposure parameters (start exposure, stop exposure, and number of exposures).
-    FLIPToneMapperType                  mToneMapper = FLIPToneMapperType::ACES; ///< Mode for controlling adaptive sampling.
-    float                               mStartExposure = 0.0f;                  ///< Start exposure used for HDR-FLIP.
-    float                               mStopExposure = 0.0f;                   ///< Stop exposure used for HDR-FLIP.
-    float                               mExposureDelta = 0.0f;                  ///< Exposure delta used for HDR-FLIP (startExposure + (numExposures - 1) * exposureDelta = stopExposure).
-    uint32_t                            mNumExposures = 2;                      ///< Number of exposures used for HDR-FLIP.
+    /// Internal buffer for temporary display output buffer.
+    ref<Texture> mpFLIPErrorMapDisplay;
+    /// Internal buffer for the HDR-FLIP exposure map.
+    ref<Texture> mpExposureMapDisplay;
+    /// Internal buffer for temporary luminance.
+    ref<Buffer> mpLuminance;
+    /// Compute pass to calculate FLIP.
+    ref<ComputePass> mpFLIPPass;
+    /// Compute pass for computing the luminance of an image.
+    ref<ComputePass> mpComputeLuminancePass;
+    /// Helper for parallel reduction on the GPU.
+    std::unique_ptr<ParallelReduction> mpParallelReduction;
 
-    Texture::SharedPtr                  mpFLIPErrorMapDisplay;                  ///< Internal buffer for temporary display output buffer.
-    Texture::SharedPtr                  mpExposureMapDisplay;                   ///< Internal buffer for the HDR-FLIP exposure map.
-    Buffer::SharedPtr                   mpLuminance;                            ///< Internal buffer for temporary luminance.
-    ComputePass::SharedPtr              mpFLIPPass;                             ///< Compute pass to calculate FLIP.
-    ComputePass::SharedPtr              mpComputeLuminancePass;                 ///< Compute pass for computing the luminance of an image.
-    ComputeParallelReduction::SharedPtr mpParallelReduction;                    ///< Helper for parallel reduction on the GPU.
-
-    bool                                mComputePooledFLIPValues = false;       ///< Enable to use parallel reduction to compute FLIP mean/min/max across whole frame.
-    float                               mAverageFLIP;                           ///< Average FLIP value across whole frame.
-    float                               mMinFLIP;                               ///< Minimum FLIP value across whole frame.
-    float                               mMaxFLIP;                               ///< Maximum FLIP value across whole frame.
-    bool                                mUseRealMonitorInfo = false;            ///< When enabled, user-proided monitor data will be overriden by real monitor data from the OS.
-    bool                                mRecompile = true;                      ///< Recompilation flag.
+    /// Enable to use parallel reduction to compute FLIP mean/min/max across whole frame.
+    bool mComputePooledFLIPValues = false;
+    /// Average FLIP value across whole frame.
+    float mAverageFLIP;
+    /// Minimum FLIP value across whole frame.
+    float mMinFLIP;
+    /// Maximum FLIP value across whole frame.
+    float mMaxFLIP;
+    /// When enabled, user-proided monitor data will be overriden by real monitor data from the OS.
+    bool mUseRealMonitorInfo = false;
+    /// Recompilation flag.
+    bool mRecompile = true;
 };

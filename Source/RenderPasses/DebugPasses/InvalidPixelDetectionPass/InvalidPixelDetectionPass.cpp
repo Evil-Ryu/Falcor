@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,26 +27,18 @@
  **************************************************************************/
 #include "InvalidPixelDetectionPass.h"
 
-const RenderPass::Info InvalidPixelDetectionPass::kInfo { "InvalidPixelDetectionPass", "Pass that marks all NaN pixels red and Inf pixels green in an image." };
-
 namespace
 {
-    const std::string kSrc = "src";
-    const std::string kDst = "dst";
-    const std::string kFormatWarning = "Non-float format can't represent Inf/NaN values. Expect black output.";
-}
+const std::string kSrc = "src";
+const std::string kDst = "dst";
+const std::string kFormatWarning = "Non-float format can't represent Inf/NaN values. Expect black output.";
+} // namespace
 
-InvalidPixelDetectionPass::InvalidPixelDetectionPass()
-    : RenderPass(kInfo)
+InvalidPixelDetectionPass::InvalidPixelDetectionPass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
-    mpInvalidPixelDetectPass = FullScreenPass::create("RenderPasses/DebugPasses/InvalidPixelDetectionPass/InvalidPixelDetection.ps.slang");
-    mpFbo = Fbo::create();
-}
-
-InvalidPixelDetectionPass::SharedPtr InvalidPixelDetectionPass::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    SharedPtr pPass = SharedPtr(new InvalidPixelDetectionPass());
-    return pPass;
+    mpInvalidPixelDetectPass =
+        FullScreenPass::create(mpDevice, "RenderPasses/DebugPasses/InvalidPixelDetectionPass/InvalidPixelDetection.ps.slang");
+    mpFbo = Fbo::create(mpDevice);
 }
 
 RenderPassReflection InvalidPixelDetectionPass::reflect(const CompileData& compileData)
@@ -65,9 +57,8 @@ RenderPassReflection InvalidPixelDetectionPass::reflect(const CompileData& compi
         uint32_t srcMipCount = edge->getMipCount();
         uint32_t srcArraySize = edge->getArraySize();
 
-        auto formatField = [=](RenderPassReflection::Field& f) {
-            return f.resourceType(srcType, srcWidth, srcHeight, srcDepth, srcSampleCount, srcMipCount, srcArraySize);
-        };
+        auto formatField = [=](RenderPassReflection::Field& f)
+        { return f.resourceType(srcType, srcWidth, srcHeight, srcDepth, srcSampleCount, srcMipCount, srcArraySize); };
 
         formatField(r.addInput(kSrc, "Input image to be checked")).format(srcFormat);
         formatField(r.addOutput(kDst, "Output where pixels are red if NaN, green if Inf, and black otherwise"));
@@ -83,12 +74,12 @@ RenderPassReflection InvalidPixelDetectionPass::reflect(const CompileData& compi
 
 void InvalidPixelDetectionPass::compile(RenderContext* pRenderContext, const CompileData& compileData)
 {
-    if (!mReady) throw RuntimeError("InvalidPixelDetectionPass: Missing incoming reflection data");
+    FALCOR_CHECK(mReady, "InvalidPixelDetectionPass: Missing incoming reflection data");
 }
 
 void InvalidPixelDetectionPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    const auto& pSrc = renderData[kSrc]->asTexture();
+    const auto& pSrc = renderData.getTexture(kSrc);
     mFormat = ResourceFormat::Unknown;
     if (pSrc)
     {
@@ -99,8 +90,8 @@ void InvalidPixelDetectionPass::execute(RenderContext* pRenderContext, const Ren
         }
     }
 
-    mpInvalidPixelDetectPass["gTexture"] = pSrc;
-    mpFbo->attachColorTarget(renderData[kDst]->asTexture(), 0);
+    mpInvalidPixelDetectPass->getRootVar()["gTexture"] = pSrc;
+    mpFbo->attachColorTarget(renderData.getTexture(kDst), 0);
     mpInvalidPixelDetectPass->getState()->setFbo(mpFbo);
     mpInvalidPixelDetectPass->execute(pRenderContext, mpFbo);
 }
@@ -111,7 +102,7 @@ void InvalidPixelDetectionPass::renderUI(Gui::Widgets& widget)
 
     if (mFormat != ResourceFormat::Unknown)
     {
-        widget.dummy("#space", { 1, 10 });
+        widget.dummy("#space", {1, 10});
         widget.text("Input format: " + to_string(mFormat));
         if (getFormatType(mFormat) != FormatType::Float)
         {

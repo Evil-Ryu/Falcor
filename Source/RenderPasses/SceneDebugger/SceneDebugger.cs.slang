@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -43,20 +43,24 @@ struct SceneDebugger
     RWTexture2D<float4> output;
     RWStructuredBuffer<PixelData> pixelData;
 
-    /** Run scene debugger for the given pixel.
-    */
+    /**
+     * Run scene debugger for the given pixel.
+     */
     void execute(const uint2 pixel)
     {
-        if (any(pixel >= params.frameDim)) return;
+        if (any(pixel >= params.frameDim))
+            return;
 
         // Initialize pixel data for the selected pixel.
         if (all(pixel == params.selectedPixel))
         {
-            pixelData[0].hitType = PixelData::kInvalidID;
-            pixelData[0].instanceID = PixelData::kInvalidID;
-            pixelData[0].materialID = PixelData::kInvalidID;
-            pixelData[0].geometryID = PixelData::kInvalidID;
-            pixelData[0].blasID = PixelData::kInvalidID;
+            PixelData d = {};
+            d.hitType = (uint)HitType::None;
+            d.instanceID = PixelData::kInvalidID;
+            d.materialID = PixelData::kInvalidID;
+            d.geometryID = PixelData::kInvalidID;
+            d.blasID = PixelData::kInvalidID;
+            pixelData[0] = d;
         }
 
         // Trace primary ray.
@@ -84,7 +88,8 @@ struct SceneDebugger
         }
 
         // Clamp pixel values if necessary.
-        if (params.clamp) color = saturate(color);
+        if (params.clamp)
+            color = saturate(color);
 
         // Write output.
         output[pixel] = float4(color, 1.f);
@@ -92,15 +97,14 @@ struct SceneDebugger
 
     float3 remapVector(float3 v)
     {
-        if (params.flipSign) v = -v;
-        if (params.remapRange) v = 0.5f * v + 0.5f;
+        if (params.flipSign)
+            v = -v;
+        if (params.remapRange)
+            v = 0.5f * v + 0.5f;
         return v;
     }
 
-    float2 remapVector(float2 v)
-    {
-        return remapVector(float3(v, 0)).xy;
-    }
+    float2 remapVector(float2 v) { return remapVector(float3(v, 0)).xy; }
 
     float3 pseudocolor(uint value)
     {
@@ -112,7 +116,7 @@ struct SceneDebugger
     {
         uint instanceID = PixelData::kInvalidID;
         uint materialID = PixelData::kInvalidID;
-
+        uint primitiveID = PixelData::kInvalidID;
         uint geometryID = PixelData::kInvalidID;
         uint blasID = PixelData::kInvalidID;
 
@@ -125,6 +129,7 @@ struct SceneDebugger
             const TriangleHit triangleHit = hit.getTriangleHit();
             instanceID = triangleHit.instanceID.index;
             geometryID = gScene.getGeometryInstance(triangleHit.instanceID).geometryID;
+            primitiveID = triangleHit.primitiveIndex;
             blasID = meshToBlasID[geometryID];
             materialID = gScene.getMaterialID(triangleHit.instanceID);
 
@@ -179,11 +184,28 @@ struct SceneDebugger
         // Write pixel data for the selected pixel.
         if (all(pixel == params.selectedPixel))
         {
-            pixelData[0].hitType = uint(hit.getType());
-            pixelData[0].instanceID = instanceID;
-            pixelData[0].materialID = materialID;
-            pixelData[0].geometryID = geometryID;
-            pixelData[0].blasID = blasID;
+            PixelData d = {};
+
+            // Geometry
+            d.hitType = uint(hit.getType());
+            d.instanceID = instanceID;
+            d.materialID = materialID;
+            d.geometryID = geometryID;
+            d.blasID = blasID;
+
+            // ShadingData
+            d.posW = sd.posW;
+            d.V = sd.V;
+            d.N = sd.frame.N;
+            d.T = sd.frame.T;
+            d.B = sd.frame.B;
+            d.uv = sd.uv;
+            d.faceN = sd.faceN;
+            d.tangentW = sd.tangentW;
+            d.frontFacing = sd.frontFacing ? 1 : 0;
+            d.curveRadius = sd.curveRadius;
+
+            pixelData[0] = d;
         }
 
         // Compute zebra stripes.
@@ -191,33 +213,23 @@ struct SceneDebugger
 
         switch ((SceneDebuggerMode)params.mode)
         {
-        case SceneDebuggerMode::FaceNormal:
-            return remapVector(sd.faceN);
-        case SceneDebuggerMode::ShadingNormal:
-            return remapVector(sd.N);
-        case SceneDebuggerMode::ShadingTangent:
-            return remapVector(sd.T);
-        case SceneDebuggerMode::ShadingBitangent:
-            return remapVector(sd.B);
-        case SceneDebuggerMode::FrontFacingFlag:
+        case SceneDebuggerMode::FlatShaded:
         {
-            float v = 0.75f * luminance(abs(sd.faceN)) + 0.25f;
-            return sd.frontFacing ? float3(0, v, 0) : float3(v, 0, 0);
+            // DEMO21:
+            // FIXME: Parameterize this
+            const float3 frontN = faceforward(sd.faceN, dir, sd.faceN);
+            const float v = 0.8f * saturate(dot(-frontN, dir)) + 0.2;
+            return float3(v, v, v);
         }
-        case SceneDebuggerMode::BackfacingShadingNormal:
-        {
-            float v = 0.75f * luminance(abs(sd.faceN)) + 0.25f;
-            bool backFacing = dot(sd.N, sd.V) <= 0.f;
-            return backFacing ? float3(z, z, 0) : float3(v, v, v);
-        }
-        case SceneDebuggerMode::TexCoords:
-            return float3(frac(remapVector(sd.uv)), 0.f);
+        // Geometry
         case SceneDebuggerMode::HitType:
             return pseudocolor(uint(hit.getType()));
         case SceneDebuggerMode::InstanceID:
             return pseudocolor(instanceID);
         case SceneDebuggerMode::MaterialID:
             return pseudocolor(materialID);
+        case SceneDebuggerMode::PrimitiveID:
+            return pseudocolor(primitiveID);
         case SceneDebuggerMode::GeometryID:
             return pseudocolor(geometryID);
         case SceneDebuggerMode::BlasID:
@@ -236,6 +248,57 @@ struct SceneDebugger
                 return float3(v, v, v);
             }
         }
+        // Shading data
+        case SceneDebuggerMode::FaceNormal:
+            return remapVector(sd.faceN);
+        case SceneDebuggerMode::ShadingNormal:
+            return remapVector(sd.frame.N);
+        case SceneDebuggerMode::ShadingTangent:
+            return remapVector(sd.frame.T);
+        case SceneDebuggerMode::ShadingBitangent:
+            return remapVector(sd.frame.B);
+        case SceneDebuggerMode::FrontFacingFlag:
+        {
+            float v = 0.75f * luminance(abs(sd.faceN)) + 0.25f;
+            return sd.frontFacing ? float3(0, v, 0) : float3(v, 0, 0);
+        }
+        case SceneDebuggerMode::BackfacingShadingNormal:
+        {
+            float v = 0.75f * luminance(abs(sd.faceN)) + 0.25f;
+            bool backFacing = dot(sd.frame.N, sd.V) <= 0.f;
+            return backFacing ? float3(z, z, 0) : float3(v, v, v);
+        }
+        case SceneDebuggerMode::TexCoords:
+            return float3(frac(remapVector(sd.uv)), 0.f);
+        // Material properties
+        case SceneDebuggerMode::BSDFProperties:
+        {
+            // Create material instance and query its properties.
+            let mi = gScene.materials.getMaterialInstance(sd, lod);
+            let bsdfProperties = mi.getProperties(sd);
+            switch ((SceneDebuggerBSDFProperty)params.bsdfProperty)
+            {
+            case SceneDebuggerBSDFProperty::Emission:
+                return bsdfProperties.emission;
+            case SceneDebuggerBSDFProperty::Roughness:
+                return float3(bsdfProperties.roughness);
+            case SceneDebuggerBSDFProperty::GuideNormal:
+                return remapVector(bsdfProperties.guideNormal);
+            case SceneDebuggerBSDFProperty::DiffuseReflectionAlbedo:
+                return bsdfProperties.diffuseReflectionAlbedo;
+            case SceneDebuggerBSDFProperty::DiffuseTransmissionAlbedo:
+                return bsdfProperties.diffuseTransmissionAlbedo;
+            case SceneDebuggerBSDFProperty::SpecularReflectionAlbedo:
+                return bsdfProperties.specularReflectionAlbedo;
+            case SceneDebuggerBSDFProperty::SpecularTransmissionAlbedo:
+                return bsdfProperties.specularTransmissionAlbedo;
+            case SceneDebuggerBSDFProperty::SpecularReflectance:
+                return bsdfProperties.specularReflectance;
+            case SceneDebuggerBSDFProperty::IsTransmissive:
+                return bsdfProperties.isTransmissive ? float3(0, 1, 0) : float3(1, 0, 0);
+            }
+        }
+
         default:
             // Should not happen.
             return float3(1, 0, 0);
@@ -262,7 +325,8 @@ struct SceneDebugger
 
     float evalGridVolumeTransmittance(GridVolume gridVolume, const float3 pos, const float3 dir, const float minT, const float maxT)
     {
-        if (!gridVolume.hasDensityGrid()) return 1.f;
+        if (!gridVolume.hasDensityGrid())
+            return 1.f;
 
         // Intersect with volume bounds and get intersection interval along the view ray.
         AABB bounds = gridVolume.getBounds();
@@ -270,7 +334,8 @@ struct SceneDebugger
         bool hit = intersectRayAABB(pos, dir, bounds.minPoint, bounds.maxPoint, nearFar);
         nearFar.x = max(nearFar.x, minT);
         nearFar.y = min(nearFar.y, maxT);
-        if (nearFar.x >= nearFar.y) return 1.f;
+        if (nearFar.x >= nearFar.y)
+            return 1.f;
 
         // Setup access to density grid.
         Grid densityGrid;
@@ -278,8 +343,8 @@ struct SceneDebugger
         Grid::Accessor accessor = densityGrid.createAccessor();
 
         // Transform to index-space.
-        const float3 ipos = mul(float4(pos, 1.f), gridVolume.data.invTransform).xyz;
-        const float3 idir = mul(float4(dir, 0.f), gridVolume.data.invTransform).xyz;
+        const float3 ipos = mul(gridVolume.data.invTransform, float4(pos, 1.f)).xyz;
+        const float3 idir = mul(gridVolume.data.invTransform, float4(dir, 0.f)).xyz;
 
         // Evaluate transmittance using ray-marching.
         const uint kSteps = 500;
@@ -300,10 +365,11 @@ cbuffer CB
     SceneDebugger gSceneDebugger;
 }
 
-/** Compute shader entry point for scene debugger.
-*/
+/**
+ * Compute shader entry point for scene debugger.
+ */
 [numthreads(16, 16, 1)]
-void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+void main(uint3 dispatchThreadId: SV_DispatchThreadID)
 {
     gSceneDebugger.execute(dispatchThreadId.xy);
 }

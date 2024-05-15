@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,72 +27,69 @@
  **************************************************************************/
 #include "BlitPass.h"
 
-const RenderPass::Info BlitPass::kInfo { "BlitPass", "Blit a texture into a different texture." };
-
 namespace
 {
-    const char kDst[] = "dst";
-    const char kSrc[] = "src";
-    const char kFilter[] = "filter";
+const char kDst[] = "dst";
+const char kSrc[] = "src";
+const char kFilter[] = "filter";
+const char kOutputFormat[] = "outputFormat";
 
-    void regBlitPass(pybind11::module& m)
-    {
-        pybind11::class_<BlitPass, RenderPass, BlitPass::SharedPtr> pass(m, "BlitPass");
-        pass.def_property(kFilter, &BlitPass::getFilter, &BlitPass::setFilter);
-    }
-}
-
-// Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
+void regBlitPass(pybind11::module& m)
 {
-    return PROJECT_DIR;
+    pybind11::class_<BlitPass, RenderPass, ref<BlitPass>> pass(m, "BlitPass");
+    pass.def_property(
+        "filter",
+        [](const BlitPass& self) { return enumToString(self.getFilter()); },
+        [](BlitPass& self, const std::string& value) { self.setFilter(stringToEnum<TextureFilteringMode>(value)); }
+    );
 }
+} // namespace
 
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    lib.registerPass(BlitPass::kInfo, BlitPass::create);
+    registry.registerClass<RenderPass, BlitPass>();
     ScriptBindings::registerBinding(regBlitPass);
+}
+
+BlitPass::BlitPass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
+{
+    parseProperties(props);
 }
 
 RenderPassReflection BlitPass::reflect(const CompileData& compileData)
 {
     RenderPassReflection r;
-    r.addOutput(kDst, "The destination texture");
+    r.addOutput(kDst, "The destination texture").format(mOutputFormat);
     r.addInput(kSrc, "The source texture");
     return r;
 }
 
-void BlitPass::parseDictionary(const Dictionary& dict)
+void BlitPass::parseProperties(const Properties& props)
 {
-    for (const auto& [key, value] : dict)
+    for (const auto& [key, value] : props)
     {
-        if (key == kFilter) setFilter(value);
-        else logWarning("Unknown field '{}' in a BlitPass dictionary.", key);
+        if (key == kFilter)
+            setFilter(value);
+        if (key == kOutputFormat)
+            mOutputFormat = value;
+        else
+            logWarning("Unknown property '{}' in a BlitPass properties.", key);
     }
 }
 
-BlitPass::SharedPtr BlitPass::create(RenderContext* pRenderContext, const Dictionary& dict)
+Properties BlitPass::getProperties() const
 {
-    return SharedPtr(new BlitPass(dict));
-}
-
-BlitPass::BlitPass(const Dictionary& dict)
-    : RenderPass(kInfo)
-{
-    parseDictionary(dict);
-}
-
-Dictionary BlitPass::getScriptingDictionary()
-{
-    Dictionary d;
-    d[kFilter] = mFilter;
-    return d;
+    Properties props;
+    props[kFilter] = mFilter;
+    if (mOutputFormat != ResourceFormat::Unknown)
+        props[kOutputFormat] = mOutputFormat;
+    return props;
 }
 
 void BlitPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    const auto& pSrcTex = renderData[kSrc]->asTexture();
-    const auto& pDstTex = renderData[kDst]->asTexture();
+    const auto& pSrcTex = renderData.getTexture(kSrc);
+    const auto& pDstTex = renderData.getTexture(kDst);
 
     if (pSrcTex && pDstTex)
     {
@@ -106,12 +103,6 @@ void BlitPass::execute(RenderContext* pRenderContext, const RenderData& renderDa
 
 void BlitPass::renderUI(Gui::Widgets& widget)
 {
-    static const Gui::DropdownList kFilterList =
-    {
-        { (uint32_t)Sampler::Filter::Linear, "Linear" },
-        { (uint32_t)Sampler::Filter::Point, "Point" },
-    };
-    uint32_t f = (uint32_t)mFilter;
-
-    if (widget.dropdown("Filter", kFilterList, f)) setFilter((Sampler::Filter)f);
+    if (auto filter = mFilter; widget.dropdown("Filter", filter))
+        setFilter(filter);
 }

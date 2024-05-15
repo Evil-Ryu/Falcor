@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,7 +26,8 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
-/** Enums for FLIP -- see FLIPPass.cs.slang and FLIPPass.cpp|h
+/**
+ * Enums for FLIP -- see FLIPPass.cs.slang and FLIPPass.cpp|h
  */
 
 #pragma once
@@ -34,15 +35,26 @@
 
 BEGIN_NAMESPACE_FALCOR
 
-/** This enum is shared between CPU/GPU.
-    It enumerates the different tone mapper options for HDR-FLIP.
-*/
+/**
+ * This enum is shared between CPU/GPU.
+ * It enumerates the different tone mapper options for HDR-FLIP.
+ */
 enum class FLIPToneMapperType : uint32_t
 {
     ACES = 0,
     Hable = 1,
     Reinhard = 2,
 };
+
+FALCOR_ENUM_INFO(
+    FLIPToneMapperType,
+    {
+        { FLIPToneMapperType::ACES, "ACES" },
+        { FLIPToneMapperType::Hable, "Hable" },
+        { FLIPToneMapperType::Reinhard, "Reinhard" },
+    }
+);
+FALCOR_ENUM_REGISTER(FLIPToneMapperType);
 
 #ifndef HOST_CODE
 float3 toneMap(float3 col, FLIPToneMapperType toneMapper = FLIPToneMapperType::ACES)
@@ -100,7 +112,7 @@ float3 toneMap(float3 col, FLIPToneMapperType toneMapper = FLIPToneMapperType::A
     float3 nom = k0 * colSq + k1 * col + k2;
     float3 denom = k3 * colSq + k4 * col + k5;
 
-    denom = isinf(denom) ? 1.0f : denom; // avoid inf / inf division
+    denom = select(isinf(denom), 1.0f, denom); // avoid inf / inf division
 
     float3 toneMappedCol = nom / denom;
 

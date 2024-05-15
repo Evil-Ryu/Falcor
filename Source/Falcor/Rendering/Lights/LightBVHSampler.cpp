@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,33 +25,17 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
 #include "LightBVHSampler.h"
-#include <glm/gtc/constants.hpp>
-#include <glm/gtx/io.hpp>
+#include "Core/Error.h"
+#include "Utils/Timing/Profiler.h"
 #include <algorithm>
 #include <numeric>
 
 namespace Falcor
 {
-    namespace
-    {
-        const Gui::DropdownList kSolidAngleBoundList =
-        {
-            { (uint32_t)SolidAngleBoundMethod::Sphere, "Sphere" },
-            { (uint32_t)SolidAngleBoundMethod::BoxToCenter, "Cone around center dir" },
-            { (uint32_t)SolidAngleBoundMethod::BoxToAverage, "Cone around average dir" },
-        };
-    }
-
-    LightBVHSampler::SharedPtr LightBVHSampler::create(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options)
-    {
-        return SharedPtr(new LightBVHSampler(pRenderContext, pScene, options));
-    }
-
     bool LightBVHSampler::update(RenderContext* pRenderContext)
     {
-        FALCOR_PROFILE("LightBVHSampler::update");
+        FALCOR_PROFILE(pRenderContext, "LightBVHSampler::update");
 
         bool samplerChanged = false;
         bool needsRefit = false;
@@ -66,7 +50,7 @@ namespace Falcor
         // Rebuild BVH if it's marked as dirty.
         if (mNeedsRebuild)
         {
-            mpBVHBuilder->build(*mpBVH);
+            mpBVHBuilder->build(pRenderContext, *mpBVH);
             mNeedsRebuild = false;
             samplerChanged = true;
         }
@@ -79,7 +63,7 @@ namespace Falcor
         return samplerChanged;
     }
 
-    Program::DefineList LightBVHSampler::getDefines() const
+    DefineList LightBVHSampler::getDefines() const
     {
         // Call the base class first.
         auto defines = EmissiveLightSampler::getDefines();
@@ -95,11 +79,11 @@ namespace Falcor
         return defines;
     }
 
-    void LightBVHSampler::setShaderData(const ShaderVar& var) const
+    void LightBVHSampler::bindShaderData(const ShaderVar& var) const
     {
         FALCOR_ASSERT(var.isValid());
         FALCOR_ASSERT(mpBVH);
-        mpBVH->setShaderData(var["_lightBVH"]);
+        mpBVH->bindShaderData(var["_lightBVH"]);
     }
 
     bool LightBVHSampler::renderUI(Gui::Widgets& widgets)
@@ -125,7 +109,7 @@ namespace Falcor
             optionsChanged |= traversalGroup.checkbox("Disable node flux", mOptions.disableNodeFlux);
             optionsChanged |= traversalGroup.checkbox("Use triangle uniform sampling", mOptions.useUniformTriangleSampling);
 
-            if (traversalGroup.dropdown("Solid Angle Bound", kSolidAngleBoundList, (uint32_t&)mOptions.solidAngleBoundMethod))
+            if (traversalGroup.dropdown("Solid Angle Bound", mOptions.solidAngleBoundMethod))
             {
                 mNeedsRebuild = optionsChanged = true;
             }
@@ -144,39 +128,21 @@ namespace Falcor
         return optionsChanged;
     }
 
-    LightBVH::SharedConstPtr LightBVHSampler::getBVH() const
+    void LightBVHSampler::setOptions(const Options& options)
     {
-        return mpBVH->isValid() ? mpBVH : nullptr;
+        if (std::memcmp(&mOptions, &options, sizeof(Options)) != 0)
+        {
+            mOptions = options;
+            mNeedsRebuild = true;
+        }
     }
 
-    LightBVHSampler::LightBVHSampler(RenderContext* pRenderContext, Scene::SharedPtr pScene, const Options& options)
+    LightBVHSampler::LightBVHSampler(RenderContext* pRenderContext, ref<Scene> pScene, const Options& options)
         : EmissiveLightSampler(EmissiveLightSamplerType::LightBVH, pScene)
         , mOptions(options)
     {
         // Create the BVH and builder.
-        mpBVHBuilder = LightBVHBuilder::create(mOptions.buildOptions);
-        if (!mpBVHBuilder) throw RuntimeError("Failed to create BVH builder");
-
-        mpBVH = LightBVH::create(pScene->getLightCollection(pRenderContext));
-        if (!mpBVH) throw RuntimeError("Failed to create BVH");
-    }
-
-    FALCOR_SCRIPT_BINDING(LightBVHSampler)
-    {
-        pybind11::enum_<SolidAngleBoundMethod> solidAngleBoundMethod(m, "SolidAngleBoundMethod");
-        solidAngleBoundMethod.value("BoxToAverage", SolidAngleBoundMethod::BoxToAverage);
-        solidAngleBoundMethod.value("BoxToCenter", SolidAngleBoundMethod::BoxToCenter);
-        solidAngleBoundMethod.value("Sphere", SolidAngleBoundMethod::Sphere);
-
-        // TODO use a nested class in the bindings when supported.
-        ScriptBindings::SerializableStruct<LightBVHSampler::Options> options(m, "LightBVHSamplerOptions");
-#define field(f_) field(#f_, &LightBVHSampler::Options::f_)
-        options.field(buildOptions);
-        options.field(useBoundingCone);
-        options.field(useLightingCone);
-        options.field(disableNodeFlux);
-        options.field(useUniformTriangleSampling);
-        options.field(solidAngleBoundMethod);
-#undef field
+        mpBVHBuilder = std::make_unique<LightBVHBuilder>(mOptions.buildOptions);
+        mpBVH = std::make_unique<LightBVH>(pScene->getDevice(), pScene->getLightCollection(pRenderContext));
     }
 }

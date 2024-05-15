@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,9 +27,15 @@
  **************************************************************************/
 #pragma once
 #include "EmissiveLightSamplerType.slangh"
+#include "Core/Macros.h"
+#include "Core/Program/DefineList.h"
+#include "Scene/Scene.h"
 
 namespace Falcor
 {
+    class RenderContext;
+    struct ShaderVar;
+
     /** Base class for emissive light sampler implementations.
 
         All light samplers follows the same interface to make them interchangeable.
@@ -38,7 +44,6 @@ namespace Falcor
     class FALCOR_API EmissiveLightSampler
     {
     public:
-        using SharedPtr = std::shared_ptr<EmissiveLightSampler>;
         virtual ~EmissiveLightSampler() = default;
 
         /** Updates the sampler to the current frame.
@@ -50,11 +55,11 @@ namespace Falcor
         /** Return a list of shader defines to use this light sampler.
         *   \return Returns a list of shader defines.
         */
-        virtual Program::DefineList getDefines() const;
+        virtual DefineList getDefines() const;
 
         /** Bind the light sampler data to a given shader var
         */
-        virtual void setShaderData(const ShaderVar& var) const {}
+        virtual void bindShaderData(const ShaderVar& var) const {}
 
         /** Render the GUI.
             \return True if settings that affect the rendering have changed.
@@ -67,10 +72,10 @@ namespace Falcor
         EmissiveLightSamplerType getType() const { return mType; }
 
     protected:
-        EmissiveLightSampler(EmissiveLightSamplerType type, Scene::SharedPtr pScene) : mType(type), mpScene(pScene) {}
+        EmissiveLightSampler(EmissiveLightSamplerType type, ref<Scene> pScene) : mType(type), mpScene(pScene) {}
 
         // Internal state
         const EmissiveLightSamplerType mType;       ///< Type of emissive sampler. See EmissiveLightSamplerType.slangh.
-        Scene::SharedPtr mpScene;
+        ref<Scene> mpScene;
     };
 }

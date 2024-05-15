@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -53,7 +53,7 @@ Texture2D<float4> gWorldTangent;
 Texture2D<float4> gWorldFaceNormal;
 Texture2D<float4> gTextureCoord;
 Texture2D<float4> gTextureGrads;
-Texture2D<uint4>  gMaterialData;
+Texture2D<uint4> gMaterialData;
 
 Texture2D<float4> gLinearColor;
 Texture2D<float4> gOutputColor;
@@ -63,11 +63,12 @@ RWStructuredBuffer<PixelData> gPixelDataBuffer;
 
 #define is_valid(name) (is_valid_##name != 0)
 
-/** Helper to create a texture sampler instance.
-    The method for computing texture level-of-detail depends on the configuration.
-    \param[in] pixel Current pixel coordinates.
-    \return Texture sampler instance.
-*/
+/**
+ * Helper to create a texture sampler instance.
+ * The method for computing texture level-of-detail depends on the configuration.
+ * @param[in] pixel Current pixel coordinates.
+ * @return Texture sampler instance.
+ */
 ITextureSampler createTextureSampler(const uint2 pixel)
 {
     if (is_valid(gTextureGrads))
@@ -81,8 +82,9 @@ ITextureSampler createTextureSampler(const uint2 pixel)
     }
 }
 
-/** Helper to load G-buffer data and prepare shading data.
-*/
+/**
+ * Helper to load G-buffer data and prepare shading data.
+ */
 bool loadShadingData(const float3 viewDir, const ITextureSampler lod, inout ShadingData sd)
 {
     float4 worldPos = gWorldPosition[gWorldPositionCoord];
@@ -104,8 +106,7 @@ bool loadShadingData(const float3 viewDir, const ITextureSampler lod, inout Shad
         v.coneTexLODValue = 0.f;
 
         // Prepare shading data.
-        // Set 'useNormalMap' parameter to false as normal mapping has already been applied when generating the G-buffer.
-        sd = gScene.materials.prepareShadingData(v, materialID, viewDir, lod, false);
+        sd = gScene.materials.prepareShadingData(v, materialID, viewDir, lod);
 
         return true;
     }
@@ -114,7 +115,7 @@ bool loadShadingData(const float3 viewDir, const ITextureSampler lod, inout Shad
 }
 
 [numthreads(1, 1, 1)]
-void main(uint3 DTid : SV_DispatchThreadID)
+void main(uint3 DTid: SV_DispatchThreadID)
 {
     const uint2 pixel = gSelectedPixel;
 
@@ -129,14 +130,14 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     if (loadShadingData(viewDir, lod, sd))
     {
-        let bsdf = gScene.materials.getBSDF(sd, lod);
-        let bsdfProperties = bsdf.getProperties(sd);
+        let mi = gScene.materials.getMaterialInstance(sd, lod);
+        let bsdfProperties = mi.getProperties(sd);
 
         // Store geometry data.
         data.posW = sd.posW;
-        data.normal = sd.N;
-        data.tangent = sd.T;
-        data.bitangent = sd.B;
+        data.normal = sd.frame.N;
+        data.tangent = sd.frame.T;
+        data.bitangent = sd.frame.B;
         data.faceNormal = sd.faceN;
         data.view = sd.V;
         data.texCoord = sd.uv;
@@ -145,12 +146,12 @@ void main(uint3 DTid : SV_DispatchThreadID)
         // Store material data.
         data.materialID = sd.materialID;
         data.doubleSided = sd.mtl.isDoubleSided() ? 1 : 0;
-        data.opacity = sd.opacity;
         data.IoR = sd.IoR;
 
-        // Store BSDF properties.
+        // Store material instance properties.
         data.emission = bsdfProperties.emission;
         data.roughness = bsdfProperties.roughness;
+        data.guideNormal = bsdfProperties.guideNormal;
         data.diffuseReflectionAlbedo = bsdfProperties.diffuseReflectionAlbedo;
         data.diffuseTransmissionAlbedo = bsdfProperties.diffuseTransmissionAlbedo;
         data.specularReflectionAlbedo = bsdfProperties.specularReflectionAlbedo;

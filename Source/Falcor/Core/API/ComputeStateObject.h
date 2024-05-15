@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,66 +26,59 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
+#include "fwd.h"
+#include "Device.h"
+#include "Handles.h"
+#include "NativeHandle.h"
+#include "Core/Macros.h"
+#include "Core/Object.h"
 #include "Core/Program/ProgramVersion.h"
-
-#ifdef FALCOR_D3D12_AVAILABLE
-#include "Core/API/Shared/D3D12RootSignature.h"
-#endif
 
 namespace Falcor
 {
-    class FALCOR_API ComputeStateObject
+#if FALCOR_HAS_D3D12
+class D3D12RootSignature;
+#endif
+
+struct ComputeStateObjectDesc
+{
+    ref<const ProgramKernels> pProgramKernels;
+#if FALCOR_HAS_D3D12
+    ref<const D3D12RootSignature> pD3D12RootSignatureOverride;
+#endif
+
+    bool operator==(const ComputeStateObjectDesc& other) const
     {
-    public:
-        using SharedPtr = std::shared_ptr<ComputeStateObject>;
-        using SharedConstPtr = std::shared_ptr<const ComputeStateObject>;
-        using ApiHandle = ComputeStateHandle;
-
-        class FALCOR_API Desc
-        {
-        public:
-            Desc& setProgramKernels(const ProgramKernels::SharedConstPtr& pProgram) { mpProgram = pProgram; return *this; }
-#if FALCOR_D3D12_AVAILABLE
-            /** Set a D3D12 root signature to use instead of the one that comes with the program kernel.
-                This function is supported on D3D12 only.
-                \param[in] pRootSignature An overriding D3D12RootSignature object to use in the compute state.
-            */
-            Desc& setD3D12RootSignatureOverride(const D3D12RootSignature::SharedConstPtr& pRootSignature) { mpD3D12RootSignatureOverride = pRootSignature; return *this; }
+        bool result = true;
+        result = result && (pProgramKernels == other.pProgramKernels);
+#if FALCOR_HAS_D3D12
+        result = result && (pD3D12RootSignatureOverride == other.pD3D12RootSignatureOverride);
 #endif
-            const ProgramKernels::SharedConstPtr getProgramKernels() const { return mpProgram; }
-            ProgramVersion::SharedConstPtr getProgramVersion() const { return mpProgram->getProgramVersion(); }
-            bool operator==(const Desc& other) const;
-        private:
-            friend class ComputeStateObject;
-            ProgramKernels::SharedConstPtr mpProgram;
-#if FALCOR_D3D12_AVAILABLE
-            D3D12RootSignature::SharedConstPtr mpD3D12RootSignatureOverride;
-#endif
-        };
+        return result;
+    }
+};
 
-        ~ComputeStateObject();
+class FALCOR_API ComputeStateObject : public Object
+{
+    FALCOR_OBJECT(ComputeStateObject)
+public:
+    ComputeStateObject(ref<Device> pDevice, ComputeStateObjectDesc desc);
+    ~ComputeStateObject();
 
-        /** Create a compute state object.
-            \param[in] desc State object description.
-            \return New object, or throws an exception if creation failed.
-        */
-        static SharedPtr create(const Desc& desc);
+    gfx::IPipelineState* getGfxPipelineState() const { return mGfxPipelineState; }
 
-        const ApiHandle& getApiHandle() { return mApiHandle; }
+    /**
+     * Returns the native API handle:
+     * - D3D12: ID3D12PipelineState*
+     * - Vulkan: VkPipeline
+     */
+    NativeHandle getNativeHandle() const;
 
-        const D3D12ComputeStateHandle& getD3D12Handle();
+    const ComputeStateObjectDesc& getDesc() const { return mDesc; }
 
-        const Desc& getDesc() const { return mDesc; }
-
-    private:
-        ComputeStateObject(const Desc& desc);
-        void apiInit();
-
-        Desc mDesc;
-        ApiHandle mApiHandle;
-
-#if defined(FALCOR_GFX) && FALCOR_D3D12_AVAILABLE
-        D3D12ComputeStateHandle mpD3D12Handle;
-#endif
-    };
-}
+private:
+    ref<Device> mpDevice;
+    ComputeStateObjectDesc mDesc;
+    Slang::ComPtr<gfx::IPipelineState> mGfxPipelineState;
+};
+} // namespace Falcor

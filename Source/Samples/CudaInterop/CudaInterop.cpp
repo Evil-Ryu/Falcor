@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,58 +27,76 @@
  **************************************************************************/
 #include "CudaInterop.h"
 #include "CopySurface.h"
+#include "Core/AssetResolver.h"
+#include "Utils/CudaUtils.h"
+
+FALCOR_EXPORT_D3D12_AGILITY_SDK
 
 namespace
 {
-    const std::string kTextureFilename = "smoke-puff.png";
+const std::filesystem::path kTexturePath = "test_images/smoke_puff.png";
 }
+
+CudaInterop::CudaInterop(const SampleAppConfig& config) : SampleApp(config) {}
+
+CudaInterop::~CudaInterop() {}
 
 void CudaInterop::onLoad(RenderContext* pRenderContext)
 {
-    // Initializes the CUDA driver API.
-    if (!FalcorCUDA::initCUDA()) throw RuntimeError("CUDA driver API initialization failed.");
+    // Initialize CUDA device
+    if (!getDevice()->initCudaDevice())
+        FALCOR_THROW("Failed to initialize CUDA device.");
 
     // Create our input and output textures
-    mpInputTex = Texture::createFromFile(kTextureFilename, false, false, ResourceBindFlags::Shared);
-    if (!mpInputTex) throw RuntimeError("Failed to load texture '{}'", kTextureFilename);
+    mpInputTex = Texture::createFromFile(
+        getDevice(), AssetResolver::getDefaultResolver().resolvePath(kTexturePath), false, false, ResourceBindFlags::Shared
+    );
+    if (!mpInputTex)
+        FALCOR_THROW("Failed to load texture '{}'", kTexturePath);
 
     mWidth = mpInputTex->getWidth();
     mHeight = mpInputTex->getHeight();
-    mpOutputTex = Texture::create2D(mWidth, mHeight, mpInputTex->getFormat(), 1, 1, nullptr, ResourceBindFlags::Shared | ResourceBindFlags::ShaderResource);
+    mpOutputTex = getDevice()->createTexture2D(
+        mWidth, mHeight, mpInputTex->getFormat(), 1, 1, nullptr, ResourceBindFlags::Shared | ResourceBindFlags::ShaderResource
+    );
 
     // Define our usage flags and then map the textures to CUDA surfaces. Surface values of 0
     // indicate an error during mapping. We need to cache mInputSurf and mOutputSurf as
     // mapTextureToSurface() can only be called once per resource.
     uint32_t usageFlags = cudaArrayColorAttachment;
-    mInputSurf = FalcorCUDA::mapTextureToSurface(mpInputTex, usageFlags);
+
+    mInputSurf = cuda_utils::mapTextureToSurface(mpInputTex, usageFlags);
     if (mInputSurf == 0)
-    {
-        throw RuntimeError("Input texture to surface mapping failed");
-    }
-    mOutputSurf = FalcorCUDA::mapTextureToSurface(mpOutputTex, usageFlags);
+        FALCOR_THROW("Input texture to surface mapping failed");
+
+    mOutputSurf = cuda_utils::mapTextureToSurface(mpOutputTex, usageFlags);
     if (mOutputSurf == 0)
-    {
-        throw RuntimeError("Output texture to surface mapping failed");
-    }
+        FALCOR_THROW("Output texture to surface mapping failed");
 }
 
-void CudaInterop::onFrameRender(RenderContext* pRenderContext, const Fbo::SharedPtr& pTargetFbo)
+void CudaInterop::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
 {
     const Falcor::float4 clearColor(0.38f, 0.52f, 0.10f, 1);
     pRenderContext->clearFbo(pTargetFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
 
     // Call the CUDA kernel
-    uint32_t format = (getFormatType(mpInputTex->getFormat()) == FormatType::Float) ? cudaChannelFormatKindFloat : cudaChannelFormatKindUnsigned;
+    uint32_t format =
+        (getFormatType(mpInputTex->getFormat()) == FormatType::Float) ? cudaChannelFormatKindFloat : cudaChannelFormatKindUnsigned;
     launchCopySurface(mInputSurf, mOutputSurf, mWidth, mHeight, format);
     pRenderContext->blit(mpOutputTex->getSRV(), pTargetFbo->getRenderTargetView(0));
 }
 
-int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nShowCmd)
+int runMain(int argc, char** argv)
 {
-    CudaInterop::UniquePtr pRenderer = std::make_unique<CudaInterop>();
-    SampleConfig config;
+    SampleAppConfig config;
     config.windowDesc.title = "Falcor-Cuda Interop";
     config.windowDesc.resizableWindow = true;
 
-    Sample::run(config, pRenderer);
+    CudaInterop cudaInterop(config);
+    return cudaInterop.run();
+}
+
+int main(int argc, char** argv)
+{
+    return catchAndReportAllExceptions([&] { return runMain(argc, argv); });
 }

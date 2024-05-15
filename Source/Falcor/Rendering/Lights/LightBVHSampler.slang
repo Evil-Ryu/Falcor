@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,7 +28,6 @@
 #include "Utils/Math/MathConstants.slangh"
 
 import Scene.Scene;
-import Scene.ShadingData;
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 import Utils.Sampling.SampleGeneratorInterface;
@@ -75,6 +74,8 @@ struct LightBVHSampler : IEmissiveLightSampler
     */
     bool sampleLight<S : ISampleGenerator>(const float3 posW, const float3 normalW, const bool upperHemisphere, inout S sg, out TriangleLightSample ls)
     {
+        ls = {};
+
         if (gScene.lightCollection.isEmpty()) return false;
 
         // Stochastically traverse the light BVH to pick a triangle.
@@ -179,6 +180,8 @@ struct LightBVHSampler : IEmissiveLightSampler
     */
     float boundCosineTerm(const float3 posW, const float3 normalW, const float3 center, const float3 extent, out float cosThetaCone)
     {
+        cosThetaCone = {};
+
         float3 coneDir;
         float sinThetaCone = 0.f;
 
@@ -371,6 +374,9 @@ struct LightBVHSampler : IEmissiveLightSampler
     */
     bool pickTriangle(const float3 posW, const float3 normalW, const bool upperHemisphere, const uint nodeIndex, const float u, out float pdf, out uint triangleIndex)
     {
+        pdf = {};
+        triangleIndex = {};
+
         const LeafNode node = _lightBVH.getLeafNode(nodeIndex);
 
         if (kUseUniformTriangleSampling)
@@ -423,6 +429,9 @@ struct LightBVHSampler : IEmissiveLightSampler
     */
     bool sampleLightViaBVH(const float3 posW, const float3 normalW, const bool upperHemisphere, float u, out float pdf, out uint triangleIndex)
     {
+        pdf = {};
+        triangleIndex = {};
+
         // Traverse BVH to select a leaf node with N triangles based on estimated probabilities during traversal.
         float leafPdf;
         uint leafNodeIndex;

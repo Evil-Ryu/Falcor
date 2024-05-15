@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -25,8 +25,9 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "stdafx.h"
+#include "Falcor.h"
 #include "FrameCapture.h"
+#include "Utils/Scripting/ScriptWriter.h"
 #include <filesystem>
 
 namespace Mogwai
@@ -61,7 +62,7 @@ namespace Mogwai
     FrameCapture::FrameCapture(Renderer* pRenderer)
         : CaptureTrigger(pRenderer, "Frame Capture")
     {
-        mpImageProcessing = ImageProcessing::create();
+        mpImageProcessing = std::make_unique<ImageProcessing>(pRenderer->getDevice());
     }
 
     void FrameCapture::renderUI(Gui* pGui)
@@ -70,7 +71,7 @@ namespace Mogwai
         {
             auto w = Gui::Window(pGui, mName.c_str(), mShowUI, {}, { 800, 400 });
 
-            CaptureTrigger::renderUI(w);
+            CaptureTrigger::renderBaseUI(w);
 
             w.checkbox("Capture All Outputs", mCaptureAllOutputs);
             w.tooltip("Capture all available outputs instead of the marked ones only.");
@@ -81,6 +82,8 @@ namespace Mogwai
 
     void FrameCapture::registerScriptBindings(pybind11::module& m)
     {
+        using namespace pybind11::literals;
+
         CaptureTrigger::registerScriptBindings(m);
 
         pybind11::class_<FrameCapture, CaptureTrigger> frameCapture(m, "FrameCapture");
@@ -104,6 +107,10 @@ namespace Mogwai
         auto getUI = [](FrameCapture* pFC) { return pFC->mShowUI; };
         auto setUI = [](FrameCapture* pFC, bool show) { pFC->mShowUI = show; };
         frameCapture.def_property(kUI.c_str(), getUI, setUI);
+
+        frameCapture.def_property("captureAllOutputs",
+            [](FrameCapture* pFC){ return pFC->mCaptureAllOutputs;},
+            [](FrameCapture* pFC, bool all){ pFC->mCaptureAllOutputs = all; });
     }
 
     std::string FrameCapture::getScriptVar() const
@@ -152,10 +159,10 @@ namespace Mogwai
     void FrameCapture::captureOutput(RenderContext* pRenderContext, RenderGraph* pGraph, const uint32_t outputIndex)
     {
         const std::string outputName = pGraph->getOutputName(outputIndex);
-        const std::string basename = getOutputNamePrefix(outputName) + std::to_string(gpFramework->getGlobalClock().getFrame());
+        const std::string basename = getOutputNamePrefix(outputName) + std::to_string(mpRenderer->getGlobalClock().getFrame());
 
-        const Texture::SharedPtr pOutput = pGraph->getOutput(outputIndex)->asTexture();
-        if (!pOutput) throw RuntimeError("Graph output {} is not a texture", outputName);
+        const ref<Texture> pOutput = pGraph->getOutput(outputIndex)->asTexture();
+        if (!pOutput) FALCOR_THROW("Graph output {} is not a texture", outputName);
 
         const ResourceFormat format = pOutput->getFormat();
         const uint32_t channels = getFormatChannelCount(format);
@@ -180,7 +187,7 @@ namespace Mogwai
             }
 
             // Copy relevant channels into new texture if necessary.
-            Texture::SharedPtr pTex = pOutput;
+            ref<Texture> pTex = pOutput;
             if (outputChannels == 1 && channels > 1)
             {
                 // Determine output format.
@@ -230,7 +237,7 @@ namespace Mogwai
                 }
 
                 // Copy color channel into temporary texture.
-                pTex = Texture::create2D(pOutput->getWidth(), pOutput->getHeight(), outputFormat, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+                pTex = mpRenderer->getDevice()->createTexture2D(pOutput->getWidth(), pOutput->getHeight(), outputFormat, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
                 mpImageProcessing->copyColorChannel(pRenderContext, pOutput->getSRV(0, 1, 0, 1), pTex->getUAV(), mask);
             }
 
@@ -253,7 +260,7 @@ namespace Mogwai
     void FrameCapture::addFrames(const std::string& graphName, const uint64_vec& frames)
     {
         auto pGraph = mpRenderer->getGraph(graphName).get();
-        if (!pGraph) throw RuntimeError("Can't find a graph named '{}'", graphName);
+        if (!pGraph) FALCOR_THROW("Can't find a graph named '{}'", graphName);
         this->addFrames(pGraph, frames);
     }
 
@@ -269,7 +276,7 @@ namespace Mogwai
     {
         auto pGraph = mpRenderer->getActiveGraph();
         if (!pGraph) return;
-        uint64_t frameID = gpFramework->getGlobalClock().getFrame();
-        triggerFrame(gpDevice->getRenderContext(), pGraph, frameID);
+        uint64_t frameID = mpRenderer->getGlobalClock().getFrame();
+        triggerFrame(mpRenderer->getRenderContext(), pGraph, frameID);
     }
 }
