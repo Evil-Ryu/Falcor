@@ -46,6 +46,7 @@ static float seed;
 static int MAX_BOUNCES = 1;//  iCameraDirty > 0. ? 3 : 3;
 static int MARCHING_STEPS = 128;// iCameraDirty > 0. ? 128 : 1024;
 static float MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
+static vec3 ro, rd;
 
 #define FAR 100.
 #define INTER_THRESHOLD .001
@@ -417,43 +418,63 @@ float box(vec3 p, vec3 b)
     vec3 d = abs(p) - b;
     return min(max(d.x, max(d.y, d.z)), .0) + length(max(d, .0));
 }
+
+float bSphere(vec4 sph)
+{
+    vec3 p = sph.xyz;
+    float t = -100.;
+    vec3  ce = ro - p;
+    float b = dot(rd, ce);
+    float c = dot(ce, ce) - sph.w * sph.w;
+    float h = b * b - c;
+    if (h > 0.0)
+    {
+        t = -b - sqrt(h);
+    }
+    return t;
+}
+
+
 vec2 map(vec3 p)
 {
-    float mateid = MAT_FRACTAL;
-
     vec3 q = p - vec3(.87, 3., 1.82);
 
-    vec2 r0 = tree((q - vec3(.3,.1,2)) * .37); r0.x /= .37;
-
-    vec2 r1 = flower(1.8*(q + vec3(4.3, 1.8, -7)), 0.); r1.x /= 1.8;
+    float t = bSphere(vec4(.87, 8, 1.82, 12.));
     
-    vec2 r2 = flower(1.2 * (q + vec3(4.5, -.2, -3)), 1.); r2.x /= 1.2;
+    vec2 r=vec2(100), r0, r1, r2, r4, r5, r6;
 
-    q = p + vec3(-35, 4.5, 16);
-    q.y += HEIGHT(q.z);
-    vec2 r4 = vec2(fractal(q.xzy), MAT_FRACTAL);
-    //if (q.z < -40.) r4.x = 10900.;
-    float s0 = box(p - vec3(6., 5, -23.5), vec3(1.5));
-    r4.x = max(r4.x, -s0);
-    //r4.x = min(r4.x, s0);
+    if (t != -100.)
+    {
+        r0 = tree((q - vec3(.3, .1, 2)) * .37); r0.x /= .37;
+        r1 = flower(1.8 * (q + vec3(4.3, 1.8, -7)), 0.); r1.x /= 1.8;
+        r2 = flower(1.2 * (q + vec3(4.5, -.2, -3)), 1.); r2.x /= 1.2;
+        r = r0;
+        if (r1.x < r.x) r = r1;
+        if (r2.x < r.x) r = r2;
+    }   
 
+    {
+        q = p + vec3(-35, 4.5, 16);
+        q.y += HEIGHT(q.z);
+        r4 = vec2(fractal(q.xzy), MAT_FRACTAL);
+        //if (q.z < -40.) r4.x = 10900.;
+        float s0 = box(p - vec3(6., 5, -23.5), vec3(1.5));
+        r4.x = max(r4.x, -s0);
+        //r4.x = min(r4.x, s0);
 
-    p.xz = mul(rot(.1), p.xz);
-    p.x = -abs(p.x+11.) - 9.8;
-    vec2 r6 = vec2(box(p + vec3(79,0,0), vec3(70, 1e5, 1e5)), MAT_FRACTAL);
+        p.xz = mul(rot(.1), p.xz);
+        p.x = -abs(p.x + 11.) - 9.8;
+        r6 = vec2(box(p + vec3(79, 0, 0), vec3(70, 1e5, 1e5)), MAT_FRACTAL);
 
-    if (p.z > 5.)p.y -= sin(p.z * .2 + 3.) * 2.;
-    else p.y -= (abs(fract(p.z * .037) - .5) * 4. - 1.)*.5;
-    vec2 r5 = vec2(max(r6.x, mb((p * .1 - vec3(-3., 3.5+smoothstep(10.,0.,p.z)*.3, 1.)), 2.) / .1), MAT_WALL);
+        if (p.z > 5.)p.y -= sin(p.z * .2 + 3.) * 2.;
+        else p.y -= (abs(fract(p.z * .037) - .5) * 4. - 1.) * .5;
+        r5 = vec2(max(r6.x, mb((p * .1 - vec3(-3., 3.5 + smoothstep(10., 0., p.z) * .3, 1.)), 2.) / .1), MAT_WALL);
 
-    vec2 r = r0;
-    if (r1.x < r.x) r = r1;
-    if (r2.x < r.x) r = r2;
-    if (r4.x < r.x) r = r4;
-    if (r5.x < r.x) r = r5;
+        if (r4.x < r.x) r = r4;
+        if (r5.x < r.x) r = r5;
+    }
 
     return r;
-
 }
 
 
@@ -484,7 +505,6 @@ vec3 getMaterial(float id, vec3 p)
     }
     else if (id == MAT_FLOWER_LEAVES)
     {
-        //return mix(vec3(.1, .25, .1), vec3(.8), fbm(p.xy * 5.) * .5);
         return mix(vec3(.1, .25, .1), vec3(.8),fbm(p*5.)*.5);
     }
     else if (id == MAT_WALL)
@@ -505,9 +525,11 @@ vec3 getNormal(vec3 p, float t)
     return normalize(n);
 }
 
-float shadow(vec3 ro, vec3 rd)
+float shadow(vec3 sro, vec3 srd)
 {
     float s = 1.,t = .001;
+    vec3 oro = ro, ord = rd;
+    ro = sro; rd = srd;
     for(int i = 0; i < 32; i++)
     {
         vec2 h = map(ro + rd * t);
@@ -516,22 +538,21 @@ float shadow(vec3 ro, vec3 rd)
         if (h.x < 1e-4) break;
         t += clamp(h.x, .01, .05);
     }
+
+    ro = oro; rd = ord;
     return clamp(s, 0., 1.);
 }
 
 
 static vec3 sunDir = normalize(vec3(-.7, 1, -.1));
-
 static vec3 sunCol = vec3(1.);
 
-
-vec2 intersect(vec3 ro, vec3 rd)
+vec2 intersect()
 {
     float rnd = .9 + .1 * hash21(seed++).x;
     float t = .01;
     vec2 res = vec2(1e9);
     bool hit = false;
-    
     for(int i = 0; i < MARCHING_STEPS; ++i)
     {
         res = map(ro + t * rd);
@@ -546,7 +567,7 @@ vec2 intersect(vec3 ro, vec3 rd)
         {
             break;
         }
-        
+
         t += res.x;
     }
     if (!hit) t = -1.;
@@ -572,17 +593,13 @@ vec3 getHemisphereSampleCosWeighted(vec3 n, vec2 s)
     return cos(s.x) * oneminus * o1 + sin(s.x) * oneminus * o2 + s.y * n;
 }
 
-
-
-
-
 float mapCloud(vec3 p)
 {
     p *= .01;
     return smoothstep(.1, 1., fbm(p * vec3(.5, 1, 1)) + .5 * fbm(p * 2.5));
 }
 
-vec3 renderCloud(vec3 ro, vec3 rd, vec2 uv)
+vec3 renderCloud(vec2 uv)
 {
     vec3 skycol = vec3(.053, .001, .0001);
     skycol = mix(skycol, vec3(0), smoothstep(.1, 1., fbm(vec3(uv * vec2(12, 60), 1))));
@@ -621,11 +638,11 @@ vec3 renderCloud(vec3 ro, vec3 rd, vec2 uv)
     return sum.xyz;
 }
 
-vec3 scene(vec3 ro, vec3 rd, vec2 uv)
+vec3 scene(vec2 uv)
 {
     vec3 throughput = vec3(1.), Lo = vec3(0), pos, q, n, albedo, nextRd, direct;
 
-    vec3 cloud = renderCloud(ro, rd, uv);
+    vec3 cloud = renderCloud(uv);
     vec3 sky = cloud * vec3(.585, .014, .0015);;
     sky = mix(sky, vec3(1, .2, 0), smoothstep(.1,1.,dot(cloud,cloud)));
 
@@ -636,7 +653,7 @@ vec3 scene(vec3 ro, vec3 rd, vec2 uv)
     // bounces
     for (int i = 0; i < MAX_BOUNCES; ++i)
     {
-        vec2 hit = intersect(ro, rd);
+        vec2 hit = intersect();
         q = pos = ro + hit.x * rd;
 
         if (hit.x < 0.)
@@ -717,18 +734,17 @@ vec4 mainImage(vec2 fragCoord)
     p = 2. * p - 1.;
     p.x *= iResolution.x / iResolution.y;
 
-    vec3 ro = vec3(RayOrigin.x, RayOrigin.y, RayOrigin.z);
+    ro = vec3(RayOrigin.x, RayOrigin.y, RayOrigin.z);
     vec3 ta = vec3(RayTarget.x, RayTarget.y, RayTarget.z);
-
     vec3 forward = normalize(ta - ro);
     vec3 right = normalize(cross(forward, UpVector));
     //vec3 right = normalize(cross(UpVector, forward));
     //vec3 up = normalize(cross(forward, right));
     vec3 up = normalize(cross(right, forward));
 
-    vec3 rd = normalize(p.x * right + p.y * up + 1.8 * forward);
+    rd = normalize(p.x * right + p.y * up + 1.8 * forward);
 
-    vec3 finalCol = scene(ro, rd, p);
+    vec3 finalCol = scene(p);
     float k = 1.;
 
     if (iFrame > 0. && iCameraDirty == 0. && iAccumulationRestart == 0.)

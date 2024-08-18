@@ -436,6 +436,10 @@ void ShaderEditor::onGuiRender(Gui* pGui)
     std::string numSppStr = "SPP Accumulated: " + std::to_string(mSppAccumulated);
     w.text(numSppStr, false);
 
+    std::string msg = gpFramework->getFrameRate().getMsg(gpFramework->isVsyncEnabled());
+    w.text(msg, false);
+
+
     w.slider("var0", mControllableVars[0], -1.f, 1.f);
     w.slider("var1", mControllableVars[1], -1.f, 1.f);
     w.slider("var2", mControllableVars[2], -1.f, 1.f);
