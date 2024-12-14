@@ -124,6 +124,7 @@ vec2 UniformSampleDisk(vec2 E)
 }
 
 // pdf = costheta / pi
+// theta 是 sample 出来的方向与法线的点积
 vec3 getHemisphereSampleCosWeighted(vec3 dir, vec2 randSample, float power = 1.)
 {
     dir = normalize(dir);
@@ -145,6 +146,8 @@ vec3 getHemisphereSampleCosWeightedFast(vec3 n, vec3 randSample)
 // extent = 1 - costheta
 // theta is the radian angel of the cone
 // pdf = 1 / (2pi * (1-costheta))
+// theta 是 sample 出来的方向与法线的点积
+
 vec3 getConeSample(vec3 dir, float extent, vec2 randSample)
 {
     // Create orthogonal vector (fails for z,y = 0)
@@ -159,32 +162,44 @@ vec3 getConeSample(vec3 dir, float extent, vec2 randSample)
     return cos(randSample.x) * oneminus * o1 + sin(randSample.x) * oneminus * o2 + randSample.y * dir;
 }
 
-
-// formula 36, sample proportional to cosine lobe around dir
-// power is the power of cos
-// pdf = (n + 1) / 2pi * cos^n
-vec3 getConeSampleCosWeighted(vec3 dir, float power, vec2 randSample)
+// 这个最标准,用于 phong 模型 sampling, pdf 也正确
+// power = 1. becomes getHemisphereSampleCosWeighted
+vec3 ImportanceSampleBlinn(vec3 n, vec2 E, float power, out float pdf)
 {
-    dir = normalize(dir);
-    vec3 o1 = normalize(ortho(dir));
-    vec3 o2 = normalize(cross(dir, o1));
+    vec3 o1 = normalize(abs(n.x) > abs(n.z) ? vec3(-n.y, n.x, 0.0) : vec3(0.0, -n.z, n.y));
+    vec3 o2 = normalize(cross(n, o1));
 
-    randSample.x = 2. * PI * randSample.x;
-    randSample.y = 1.0 - pow(randSample.y, 1. / (power + 1.));
+    float Phi = 2. * PI * E.x;
+    float CosTheta = pow(E.y, 1. / (power + 1.));
+    float SinTheta = sqrt(abs(1 - CosTheta * CosTheta));
 
-    float oneminus = sqrt(1.0 - randSample.y * randSample.y);
-    return cos(randSample.x) * oneminus * o1 + sin(randSample.x) * oneminus * o2 + randSample.y * dir;
+    vec3 sampleDir = cos(Phi) * SinTheta * o1 + sin(Phi) * SinTheta * o2 + CosTheta * n;
+
+    pdf = (power + 2.) / (2. * PI) * pow(CosTheta, power);
+
+    return sampleDir;
 }
 
-vec3 getPhoneSpecularSample(vec3 dir, float power, inout float seed)
-{
-    return getConeSampleCosWeighted(dir, power, seed);
+
+// 来自 reinder 的 old watch
+vec3 modifyDirectionWithRoughness(const vec3 n, const float roughness, inout float seed) {
+    vec2 randSample = hash21(seed++);
+
+    vec3  o1 = normalize(cross(n, abs(n.y) > .5 ? vec3(1., 0., 0.) : vec3(0., 1., 0.)));
+    vec3  o2 = cross(o1, n);
+    float power = 2. / pow(roughness, 4.) - 2.;
+
+    float a = roughness * roughness;
+    a *= a; a *= a; // I want to have a really shiny watch.
+    //randSample.y = sqrt(abs(1.0 - pow(randSample.y, 1. / (power + 1.)))); //
+    randSample.y = sqrt(abs((1.0 - randSample.y) / clamp(1. + (a - 1.) * randSample.y, .00001, 1.)));
+    float oneminus = sqrt(abs(1. - randSample.y * randSample.y));
+
+    vec3  rr = vec3(oneminus * cos(6.2831 * randSample.x) * o1 + oneminus * sin(6.2831 * randSample.x) * o2 + randSample.y * n);
+
+    return normalize(rr);
 }
 
-float getPhongSpecularPdf(float shininess, vec3 worldNormal, vec3 worldRefl)
-{
-    return (shininess + 1.) / (2. * PI) * pow(max(0., dot(worldRefl, worldNormal)), shininess);
-}
 
 
 

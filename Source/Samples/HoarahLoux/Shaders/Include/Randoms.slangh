@@ -73,7 +73,64 @@ vec3 hash33(vec3 p)
 
 //----------------------------------------------------------------------------------------
 
-uint wangHash(uint seed)
+
+#if 1
+//Modified from: iq's "Integer Hash - III" (https://www.shadertoy.com/view/4tXyWN)
+//Faster than "full" xxHash and good quality
+uint baseHash(uvec2 p)
+{
+    p = 1103515245U * ((p >> 1U) ^ (p.yx));
+    uint h32 = 1103515245U * ((p.x) ^ (p.y >> 3U));
+    return h32 ^ (h32 >> 16);
+}
+#else
+//XXHash32 based (https://github.com/Cyan4973/xxHash)
+//Slower, higher quality
+uint baseHash(uvec2 p)
+{
+    const uint PRIME32_2 = 2246822519U, PRIME32_3 = 3266489917U;
+    const uint PRIME32_4 = 668265263U, PRIME32_5 = 374761393U;
+    uint h32 = p.y + PRIME32_5 + p.x * PRIME32_3;
+    h32 = PRIME32_4 * ((h32 << 17) | (h32 >> (32 - 17))); //Initial testing suggests this line could be omitted for extra perf
+    h32 = PRIME32_2 * (h32 ^ (h32 >> 15));
+    h32 = PRIME32_3 * (h32 ^ (h32 >> 13));
+    return h32 ^ (h32 >> 16);
+}
+#endif
+
+//---------------------2D input---------------------
+
+float hash12(uvec2 x)
+{
+    uint n = baseHash(x);
+    return float(n) * (1.0 / float(0xffffffffU));
+}
+
+vec2 hash22(uvec2 x)
+{
+    uint n = baseHash(x);
+    uvec2 rz = uvec2(n, n * 48271U);
+    return vec2((rz.xy >> 1) & uvec2(0x7fffffffU)) / float(0x7fffffff);
+}
+
+vec3 hash32(uvec2 x)
+{
+    uint n = baseHash(x);
+    uvec3 rz = uvec3(n, n * 16807U, n * 48271U);
+    return vec3((rz >> 1) & uvec3(0x7fffffffU)) / float(0x7fffffff);
+}
+
+vec4 hash42(uvec2 x)
+{
+    uint n = baseHash(x);
+    uvec4 rz = uvec4(n, n * 16807U, n * 48271U, n * 69621U); //see: http://random.mat.sbg.ac.at/results/karl/server/node4.html
+    return vec4((rz >> 1) & uvec4(0x7fffffffU)) / float(0x7fffffff);
+}
+
+
+
+
+uint whangHash(uint seed)
 {
     seed = (seed ^ 61) ^ (seed >> 16);
     seed *= 9;
@@ -83,9 +140,21 @@ uint wangHash(uint seed)
     return seed;
 }
 
+float whangHashFloat(uint seed)
+{
+    seed = (seed ^ 61) ^ (seed >> 16);
+    seed *= 9;
+    seed = seed ^ (seed >> 4);
+    seed *= 0x27d4eb2d;
+    seed = seed ^ (seed >> 15);
+    float value = float(seed) / (4294967296.0);
+
+    return value;
+}
+
 // with more seeds, e.g use fragcoord.xy for v, s
 // u for a sequential randoms
-float wangHash(uint u, uint v, uint s)
+float whangHash(uint u, uint v, uint s)
 {
     // https://www.reedbeta.com/blog/quick-and-easy-gpu-random-numbers-in-d3d11/
     // https://www.shadertoy.com/view/ldjczd

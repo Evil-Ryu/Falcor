@@ -23,6 +23,7 @@
   </ItemGroup>
   <ItemGroup>
     <ShaderSource Include="Shaders\ColorShiftPost.slang" />
+    <ShaderSource Include="Shaders\Revision2024.slang" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{F041EF57-B330-4E03-96A9-95F97D892357}</ProjectGuid>

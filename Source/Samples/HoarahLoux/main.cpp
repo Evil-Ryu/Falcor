@@ -47,8 +47,8 @@ void ShaderEditor::resetCamera()
 {
     auto camera = mCameras[0];
    
-    camera->setPosition(float3(-4.76, 4.86, 29.46));
-    camera->setTarget(float3(-4.72, 4.87, 28.46));
+    camera->setPosition(float3(0, 0, -3));
+    camera->setTarget(float3(0,0,0));
     // for skybox
     /*camera->setPosition(float3(6.64, 10., -1.79));
     camera->setTarget(float3(6.53, 10.,-2.8));*/
@@ -158,7 +158,7 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Revision2023.slang";
+    std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Revision2024.slang";
     mPasses[0].mPass = FullScreenPass::create(path0Str);
     mPasses[0].mShaderPath = getFilenameFromPath(path0Str);
 
@@ -277,6 +277,16 @@ void ShaderEditor::setCommonVars(FullScreenPass::SharedPtr& pass, float w, float
         }
     }
 
+
+    // var
+    for (int i = 0; i < MAX_CONTROLLABLE_VARS; ++i)
+    {
+        std::string varName = "var" + std::to_string(i);
+        if (pass["ToyCB"].findMember(varName).isValid())
+        {
+            pass["ToyCB"][varName] = mControllableVars[i];
+        }
+    }
 
     // debug
     if (pass.getRootVar().findMember("debugTexture").isValid())
@@ -440,11 +450,11 @@ void ShaderEditor::onGuiRender(Gui* pGui)
     w.text(msg, false);
 
 
-    w.slider("var0", mControllableVars[0], -1.f, 1.f);
-    w.slider("var1", mControllableVars[1], -1.f, 1.f);
-    w.slider("var2", mControllableVars[2], -1.f, 1.f);
-    w.slider("var3", mControllableVars[3], -1.f, 1.f);
-    w.slider("var4", mControllableVars[4], -1.f, 1.f);
+    w.slider("var0", mControllableVars[0], -5.f, 5.f);
+    w.slider("var1", mControllableVars[1], -5.f, 5.f);
+    w.slider("var2", mControllableVars[2], -5.f, 5.f);
+    w.slider("var3", mControllableVars[3], -5.f, 5.f);
+    w.slider("var4", mControllableVars[4], -5.f, 5.f);
 
 
     /*if (mDrawWireframe == false)

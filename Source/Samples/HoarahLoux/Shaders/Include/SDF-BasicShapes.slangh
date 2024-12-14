@@ -232,3 +232,17 @@ float sdPyramid(in vec3 p, in float h)
     // recover 3D and scale, and add sign
     return sqrt((d2 + q.z * q.z) / m2) * sign(max(q.z, -p.y));;
 }
+
+
+float cutSphere(vec3 p, float r, float h)
+{
+    float w = sqrt(r * r - h * h);
+
+    vec2 q = vec2(length(p.xz), p.y);
+
+    float s = max((h - r) * q.x * q.x + w * w * (h + r - 2.0 * q.y), h * q.x - w * q.y);
+
+    return (s < 0.0) ? length(q) - r :
+        (q.x < w) ? h - q.y :
+        length(q - vec2(w, h));
+}

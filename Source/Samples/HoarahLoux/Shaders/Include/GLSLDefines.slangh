@@ -14,6 +14,7 @@
 #define fract frac
 #define mat3 float3x3
 #define mat2 float2x2
+#define floatBitsToUint asuint
 
 
 
