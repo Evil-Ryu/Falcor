@@ -17,6 +17,10 @@
 #define floatBitsToUint asuint
 
 
+#define radian radians
+
+
+
 
 float mod(float x, float y)
 {

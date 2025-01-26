@@ -17,6 +17,8 @@
 #define mat2 float2x2
 #define floatBitsToUint asuint
 
+#define radian radians
+
 
 float mod(float x, float y)
 {
@@ -63,6 +65,14 @@ static vec3 ro, rd;
 
 #define MAX_SHININESS 2048.
 
+#define MAT_METAL 0.
+#define MAT_STONE 1.
+#define MAT_BONE 2.
+#define MAT_SHELL 3.
+#define MAT_DARKMETAL 4.
+#define MAT_LAVA 5.
+
+
 
 
 uint baseHash(uvec2 p) {
@@ -96,6 +106,7 @@ vec2 hash21(float p)
     return fract(vec2(p2.x * p2.y * 95.4337, p2.x * p2.y * 97.597));
 }
 
+
 float noise(vec3 p)
 {
     const vec3 s = vec3(7, 157, 113);
@@ -124,12 +135,40 @@ float fbm(vec3 p)
     return f;
 }
 
+float hash(vec2 p)
+{
+    vec3 p3 = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float noise(vec2 p)
+{
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3. - 2. * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x),
+        mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+
+
+float fbm(vec2 p)
+{
+    float f = 0.0;
+    f += .5 * noise(p); p = p * 2.01;
+    f += .25 * noise(p); p = p * 2.1;
+    f += .125 * noise(p); p = p * 2.03;
+    return f;
+}
+
+
+
+
 float bump(vec3 p)
 {
     return fbm(p * vec3(.1, .025, .1) * iResolution.x);
 }
 
-vec3 bump_mapping(vec3 p, vec3 n, float weight)
+vec3 bumpMapping(vec3 p, vec3 n, float weight)
 {
     vec2 e = vec2(2. / iResolution.y, 0);
     vec3 g = vec3(bump(p - e.xyy) - bump(p + e.xyy),
@@ -137,6 +176,15 @@ vec3 bump_mapping(vec3 p, vec3 n, float weight)
         bump(p - e.yyx) - bump(p + e.yyx)) / (e.x * 2.);
     g = (g - n * dot(g, n));
     return normalize(n + g * weight);
+}
+
+float texFbm(vec3 p, vec3 n)
+{
+    float cx = fbm(p.yz);
+    float cy = fbm(p.zx);
+    float cz = fbm(p.xy);
+
+    return cx * abs(n.x) + cy * abs(n.y) + cz * abs(n.z);
 }
 
 mat2 rot(float r)
@@ -150,7 +198,55 @@ float smin(float a, float b, float k)
     return mix(b, a, h) - k * h * (1. - h);
 
 }
+float smin2(float a, float b, float k, out float h)
+{
+    h = clamp(.5 + .5 * (b - a) / k, .0, 1.);
 
+    return mix(b, a, h) - k * h * (1. - h);
+
+}
+
+
+void opU(inout vec2 obj, float b, float matB)
+{
+    obj = obj.x < b ? obj : vec2(b, matB);
+}
+void opSmoothU(inout vec2 obj, float b, float k, float matB)
+{
+    float h = clamp(.5 + .5 * (b - obj.x) / k, .0, 1.);
+    obj = vec2(mix(b, obj.x, h) - k * h * (1. - h), obj.x<b?obj.y:matB);
+}
+
+void opStairU(inout vec2 obj, float b, float r, float n, float matB)
+{
+    float s = r / n;
+    float u = b - r;
+    obj= vec2(min(min(obj.x, b), 0.5 * (u + obj.x + abs(mod(u - obj.x + s, 2. * s) - s))),
+                obj.x < b ? obj.y : matB);
+}
+void opCut(inout vec2 obj, float b, float matB)
+{
+    obj = obj.x > -b ? obj : vec2(-b, matB);
+}
+
+float smax(float a, float b, float k)
+{
+    float h = max(k - abs(a - b), 0.0f);
+    return max(a, b) + h * h * 0.25f / k;
+}
+
+void opSmoothCut(inout vec2 obj, float b,  float k, float matB)
+{
+    opSmoothU(obj, b, -k, matB);
+}
+
+
+float stairMin(float x, float y, float r, float n)
+{
+    float s = r / n;
+    float u = y - r;
+    return min(min(x, y), 0.5 * (u + x + abs(mod(u - x + s, 2. * s) - s)));
+}
 
 void rz(inout vec3 p, float a)
 {
@@ -226,14 +322,6 @@ vec2 fold(vec2 p, float s, out float id)
     return p;
 }
 
-float dbar2(vec3 p, vec3 a, vec3 b, vec3 r)
-{
-    vec3 pa = p - a, ba = b - a;
-    float h = clamp(dot(pa, ba) / dot(ba, ba), .0, 1.);
-    return (length((pa - ba * h) / r) - 1.) * min(min(r.x, r.y), r.z);
-}
-
-
 float box(vec3 p, vec3 b)
 {
     vec3 d = abs(p) - b;
@@ -266,20 +354,6 @@ vec2 rot2(vec2 p, float a)
     return mul(mat2(co, si, -si, co), p);
 }
 
-void ry(inout vec3 p, float a) {
-    float c, s; vec3 q = p;
-    c = cos(a); s = sin(a);
-    p.x = c * q.x + s * q.z;
-    p.z = -s * q.x + c * q.z;
-}
-void rx(inout vec3 p, float a)
-{
-    float c, s; vec3 q = p;
-    c = cos(a); s = sin(a);
-    p.y = c * q.y - s * q.z;
-    p.z = s * q.y + c * q.z;
-}
-
 float rbox(vec3 p, vec3 b, float r)
 {
     return length(max(abs(p) - b, 0.0)) - r;
@@ -292,27 +366,7 @@ float cylinder(vec3 p, vec2 h)
 }
 
 
-float sphere(vec3 p, float r)
-{
-    return length(p) - r;
-}
 
-float smax(float a, float b, float k)
-{
-    return smin(a, b, -k);
-}
-
-vec2 merge(vec2 d0, vec2 d1)
-{
-    if (d0.x < d1.x) return d0;
-    else return d1;
-}
-
-vec2 smerge(vec2 d0, vec2 d1, float k)
-{
-    vec2 res = merge(d0, d1);
-    return vec2(smin(d0.x, d1.x, k), res.y);
-}
 #define GR 1.618
 
 float sabs(float x, float k)
@@ -323,15 +377,6 @@ float sabs(float x, float k)
 vec2 plane(vec3 p, float y)
 {
     return vec2(abs(p.y + y), 4.);
-}
-
-vec2 screw(vec3 p)
-{
-    float d0 = cylinder(p.xyz + vec3(0.08, 0.0, 0.0), vec2(.035, .46));
-    p.xz = rot2(p.xz, -0.5);
-    float d1 = box(p.xyz + vec3(0.07, 0.0, -0.04), vec3(0.012, 1., 0.033));
-    float d = max(d0, -d1);
-    return vec2(d, 0.);
 }
 
 float vcapsule(vec3 p, float h, float r)
@@ -361,217 +406,25 @@ float cutSphere(vec3 p, float r, float h)
 }
 
 
-#define MTL_EYE 2.0
-#define MTL_CHEEK 3.0
-#define MTL_JAW 4.0
-#define MTL_HAIR 5.0
-#define MTL_ORBIT 6.0
-
-static float g_d;
-static float g_mtl_id;
-static vec3 g_eye_pos;
-static vec3 g_upper_lip_pos;
-static vec3 g_lower_lip_pos;
-static vec3 g_cheek_pos;
-static vec3 g_hair_offset = vec3(0.0, -2.2, 0.8);
-static float g_hair_scale = 2.0;
-
-void rp_rotate_y(inout vec3 p, float a)
-{
-    float c, s; vec3 q = p;
-    c = cos(a); s = sin(a);
-    p.x = c * q.x + s * q.z;
-    p.z = -s * q.x + c * q.z;
-}
-
-void rp_rotate_z(inout vec3 p, float a)
-{
-    float c, s; vec3 q = p;
-    c = cos(a); s = sin(a);
-    p.x = c * q.x - s * q.y;
-    p.y = s * q.x + c * q.y;
-}
-
-
-void rp_rotate_x(inout vec3 p, float a)
-{
-    float c, s; vec3 q = p;
-    c = cos(a); s = sin(a);
-    p.y = c * q.y - s * q.z;
-    p.z = s * q.y + c * q.z;
-}
-
-
 //-----------distance functions from iq----------------
-
-
-float round_box(vec3 p, vec3 b, float r)
-{
-    return length(max(abs(p) - b, 0.0)) - r;
-}
-
-
-float torus(vec3 p, vec2 t)
-{
-    vec2 q = vec2(length(p.xz) - t.x, p.y);
-    return length(q) - t.y;
-}
-
-float tri_prism(vec3 p, vec2 h)
-{
-    vec3 q = abs(p);
-    return max(q.z - h.y, max(q.x * 0.866025 + p.y * 0.5, -p.y) - h.x * 0.5);
-}
-
-
-float capsule(vec3 p, vec3 a, vec3 b, float r)
-{
-    vec3 pa = p - a, ba = b - a;
-    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    return length(pa - ba * h) - r;
-}
-
-
-float hash(vec2 p)
-{
-    p = fract(p * vec2(5.3983, 5.4472));
-    p += dot(p.yx, p.xy + vec2(21.5351, 14.3137));
-    return fract(p.x * p.y * 95.4337);
-}
-
-float noise(vec2 p)
-{
-    vec2 f;
-    f = fract(p);
-    p = floor(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(p), hash(p + vec2(1.0, 0.0)), f.x),
-        mix(hash(p + vec2(0.0, 1.0)), hash(p + vec2(1.0, 1.0)), f.x), f.y);
-}
-
-
-float jaw(vec3 p, vec3 ds, float s)
-{
-    p.y += 1.73;
-    p.z -= 1.37;
-    rp_rotate_x(p, 0.3);
-    float d0 = round_box(p, vec3(s * sin((1.0 - p.y)), 0.4, 1.0) + ds, 0.1);
-    p.x = abs(p.x) - 0.18;
-    p.z -= 0.3;
-    p.y += 0.3;
-    float d1 = capsule(p, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.5, -0.23), 0.07);
-
-    return smin(d0, d1, 0.2);
-}
-
-float nose(vec3 p)
-{
-    p.y += 0.6;
-    p.z -= 1.25;
-    float d0 = round_box(p, vec3(0.01,
-        0.4,
-        atan((1.0 - p.y * 2.) * (1.0 - p.y * p.y * 2.)) * 0.45), 0.05);
-
-    p.z -= 0.3;
-    p.y += 0.4;
-    p.x = abs(p.x) - 0.02;
-    float d1 = capsule(p, vec3(0.0, 0.0, 0.0), vec3(0.3, 0.15, -0.4) * 0.4, 0.07);
-    return smin(d0 / 2., d1, 0.2);
-}
-
-float cheek(vec3 p)
-{
-    p.y += 0.7;
-    p.z -= 1.1;
-    p.x = abs(p.x) - 0.7;
-    float d0 = capsule(p + vec3(.9, -.15, 0), vec3(0, 0, -.1), vec3(.8, -.1, 0), .35);
-    return d0;
-}
-
-float orbit(vec3 p)
-{
-    p.y += 0.16;
-    p.z -= 1.23;
-    p.x = abs(p.x) - 0.5;
-    rp_rotate_z(p, -0.2);
-    rp_rotate_y(p, -0.4);
-    //float d0 = round_box(p, vec3(0.24, 0.04, 0.24), 0.13);
-    float d0 = round_box(p, vec3(.2, .02, .2), 0.13);
-
-    return d0;
-}
-
-float eye(vec3 p)
-{
-    p.y += 0.19;
-    p.z -= 0.9;
-    p.x = abs(p.x) - 0.47;
-    //float d0 = sphere(p, 0.28);
-    float d0 = sphere(p, 0.2);
-    return d0;
-}
-
-float brow_ridge(vec3 p)
-{
-    p.y += 0.2;
-    p.z -= 0.4;
-    p.x = abs(p.x) - 0.2;
-    rp_rotate_z(p, -0.3);
-    rp_rotate_x(p, 0.3);
-
-    float d0 = torus(p, vec2(0.83, 0.07));
-    return d0;
-}
-
-
-float head(vec3 p)
-{
-    p.z *= -1.;
-    vec3 tp = p;
-    rp_rotate_x(tp, 0.3);
-    tp.y -= 1.7;
-    tp.z -= 0.6;
-    float d0 = round_box(tp, vec3(0.87 * (0.3 * sin(tp.y) + 0.5),
-        0.6,
-        0.04 + (tp.y * 0.15 + 0.1)), 0.4);
-    tp = p;
-    tp.y -= 3.0;
-    tp.z += .599;
-    float d1 = sphere(tp, 1.0);
-    float d2 = brow_ridge(tp);
-    float d3 = orbit(tp);
-    float d4 = cheek(tp);
-    float d5 = nose(tp);
-    float d6 = jaw(tp, vec3(0.0), 0.4);
-
-    // movement of jaw
-    vec3 jp = tp;
-    float d7 = jaw(jp, vec3(-0.01, -0.1, -0.9), 0.3);
-    float d8 = eye(tp);
-    float d10 = sphere(p + vec3(0.0, -2.2, 2.2), 2.25);
-
-    float d = smin(d1, d0, 0.5);
-    d = smin(d, d2, 0.3);
-    if (d4 < d) { g_mtl_id = MTL_CHEEK; g_cheek_pos = p; }
-    d = smin(d, d4, 0.2);
-    d = smax(d, -d3,.1);
-    //d = max(d, -d6);
-    if (d7 < d) { d = d7; g_mtl_id = MTL_JAW; g_lower_lip_pos = jp; }
-   // d = max(d, -d10);
-    if (d5 < d) { g_mtl_id = 1.0; }
-    d = smin(d, d5, 0.2);
-
-   // if (d8 < d) { d = d8; g_mtl_id = MTL_EYE; g_eye_pos = p; }
-    g_upper_lip_pos = p;
-
-
-    return d;
-}
 
 float triPrism(vec3 p, vec2 h)
 {
     vec3 q = abs(p);
     return max(q.z - h.y, max(q.x * .866025 + p.y * .5, -p.y) - h.x * .5);
+}
+
+float pModPolar(inout vec2 p, float repetitions) {
+	float angle = 2*PI/repetitions;
+	float a = atan2(p.y, p.x) + angle/2.;
+	float r = length(p);
+	float c = floor(a/angle);
+	a = mod(a,angle) - angle/2.;
+	p = vec2(cos(a), sin(a))*r;
+	// For an odd number of repetitions, fix cell index of the cell in -x direction
+	// (cell index would be e.g. -5 and 5 in the two halves of the cell):
+	if (abs(c) >= (repetitions/2)) c = abs(c);
+	return c;
 }
 
 vec2 polar_rep(vec2 p, float n)
@@ -584,28 +437,20 @@ vec2 polar_rep(vec2 p, float n)
     return 0.5 * (p + p - vec2(1, 0));
 }
 
-float fOpUnionStairs(float x, float y, float r, float n)
-{
-    float s = r / n;
-    float u = y - r;
-    return min(min(x, y), 0.5 * (u + x + abs(mod(u - x + s, 2. * s) - s)));
-}
-
-float fOpUnionChamfer(float a, float b, float r) {
-    return min(min(a, b), (a - r + b) * sqrt(0.5));
-}
+static float legoLen = 1.;
 
 vec2 lego(vec3 p)
 {
-    return fOpUnionStairs(max(abs(vcylinder(p.yzx+vec3(0,1,0),.7,.5))-.1,-p.z-1.5), fOpUnionStairs(box(p, vec3(1, 1.3, 1)), vcylinder(p, 2., .5), .3, 4.), .2, 2.);
+    return stairMin(max(abs(vcylinder(p.yzx+vec3(0,1,0),.7,.5))-.1,-p.z-1.5), stairMin(box(p, vec3(1, 1.3, legoLen)), vcylinder(p, 2., .5), .3, 4.), .2, 2.);
 }
 
 vec2 sword(vec3 p)
 {
     rot22(p.xy, -.6);
-    float d = triPrism(vec3(p.x * 2., abs(p.y - 1.), p.z), vec2(.4-exp(p.z*2.-1.8) * 0.38, 2.)) / 2.;
-    d = fOpUnionStairs(d, vcylinder(p.xzy+vec3(0,2.8,-1.), 1.2,.1), .3,4.);
-
+    float d = triPrism(vec3(p.x * 2., abs(p.y - 1.), p.z), vec2(.4-exp(p.z*2.-1.8) * 0.38, 2.)) / 2. - fbm(p * 10.) * 0.02;
+    d = stairMin(d, vcylinder(p.xzy + vec3(0, 2.8, -1.), 1.2, .1), .3, 4.);
+    d = stairMin(d, vcylinder(p.xzy + vec3(0, 3.8, -1.), .1, .2), .1, 3.);
+    
     return vec2(d, 0);
 }
 
@@ -623,7 +468,8 @@ float n3D(vec3 p) {
     h.xy = mix(h.xz, h.yw, p.y);
     return mix(h.x, h.y, p.z);
 }
-vec2 skull(vec3 p)
+
+float skull(vec3 p)
 {
     float noise = (n3D(p * 3.0) - 0.5) * 0.3;
 
@@ -669,193 +515,533 @@ vec2 skull(vec3 p)
     rot22(q.xy, .45);
     d = smax(d, -sdEllipsoid(vec3(q.x, q.y+.35, q.z+.7), vec3(.05,.1,.45)), .05);
 
+    // tooth
     q = p + vec3(0., .65, .19);
     rot22(q.yz, -.2);
     q.xz = polar_rep(q.xz, 8.);
     q.x += 0.23;
 
-    float d1 = min(d, sdEllipsoid(vec3(q.x,q.y,q.z), vec3(.02,.25,.03)));
+    float d1 = min(d, sdEllipsoid(q, vec3(.02,.25,.03)));
     d1 = max(d1, -sdEllipsoid(vec3(q.y-.02, q.x, q.z), vec3(.01, .25, .05)));
     d = min(d, d1);
-    return vec2(d,0.);
+    d = max(d, length(p) - 1.6);
+    return d;
+}
+
+
+float oct(vec3 p, float s)
+{
+    p = abs(p);
+    return (p.x + p.y + p.z - s) * 0.57735027;
+}
+float blade(vec3 p)
+{
+    float d = smax(box(p, vec3(3,.01,.5)), -vcylinder(p + vec3(-.3, 0, .5), .1, 1.), .1);
+    //float d = box(p, vec3(3, .01, .5-.45*abs(cos(p.x*4.+p.z*8.-1.))));
+    //float d = box(p, vec3(3, .01, .5-.49*abs(cos(p.x*1.-3.2-p.z*2.))));
+    //float d = oct(p*vec3(0.5,4.5,1.), 1.)/5.;
+    //float d = sdEllipsoid(p, vec3(5.5,1.,1.));
+    return d;
+}
+
+
+mat3 vrot(vec3 p, float t)
+{
+    float c = cos(radian(t));
+    float s = sin(radian(t));
+    return mat3(c + (1.0 - c) * p.x * p.x, (1.0 - c) * p.x * p.y - s * p.z, (1.0 - c) * p.x * p.z + s * p.y,
+        (1.0 - c) * p.x * p.y + s * p.z, c + (1.0 - c) * p.y * p.y, (1.0 - c) * p.y * p.z - s * p.x,
+        (1.0 - c) * p.x * p.z - s * p.y, (1.0 - c) * p.y * p.z + s * p.x, c + (1.0 - c) * p.z * p.z);
+}
+
+//float absScalem1 = abs(Scale - 1.0);
+//float AbsScaleRaisedTo1mIters = pow(abs(Scale), float(1 - Iterations));
+
+static vec4 orbitTrap = vec4(1e9);
+
+//float kalibox(vec3 p)
+//{
+//    vec4 z = vec4(p, 1), c = vec4(0,0,-.46765, 1);
+//
+//    mat3 rotation = vrot(vec3(1, 1, .19008), 18.783);
+//
+//    for (int i = 0; i < 10; i++)
+//    {
+//        //z.xyz *= rotation;
+//        z.xyz = mul( rotation, z.xyz);
+//        z.xyz = abs(z.xyz) + vec3(-.9712,-2.1223,.1079);
+//        float r2 = dot(z.xyz, z.xyz);
+//        if (i < 3)
+//            orbitTrap = min(orbitTrap, abs(vec4(z.xyz, r2)));
+//        z *= clamp(max(.3492 / r2, .3492), 0., 1.);  // dp3,div,max.sat,mul
+//        z = z * 1.70502 + c;
+//
+//    }
+//
+//    return (length(z.xyz) - abs(1.70502-1.)) / z.w - pow(abs(1.70502), 1.-10.);
+//}
+
+//float kalibox(vec3 p)
+//{
+//    vec4 z = vec4(p, 1), c = vec4(0, 0, -.46765, 1);
+//
+//    mat3 rotation = vrot(vec3(1, 1, .19008), 18.783);
+//
+//    for (int i = 0; i < 10; i++)
+//    {
+//        //z.xyz *= rotation;
+//        z.xyz = mul(rotation, z.xyz);
+//        z.xyz = abs(z.xyz) + vec3(-.9712, -2.1223, .1079);
+//        float r2 = dot(z.xyz, z.xyz);
+//        if (i < 3)
+//            orbitTrap = min(orbitTrap, abs(vec4(z.xyz, r2)));
+//        z *= clamp(max(.3492 / r2, .3492), 0., 1.);  // dp3,div,max.sat,mul
+//        z = z * 1.70502 + c;
+//
+//    }
+//
+//    return (length(z.xyz) - abs(1.70502 - 1.)) / z.w - pow(abs(1.70502), 1. - 10.);
+//}
+
+
+//
+//float DE(vec3 pos) {
+//    vec4 p = vec4(pos, 1), p0 = vec4(Julia, 1);  // p.w is the distance estimate
+//
+//    for (int i = 0; i < Iterations; i++) {
+//        p.xyz *= rot;
+//        p.xyz = abs(p.xyz) + Trans;
+//        float r2 = dot(p.xyz, p.xyz);
+//        if (i < ColorIterations) orbitTrap = min(orbitTrap, abs(vec4(p.xyz, r2)));
+//        p *= clamp(max(MinRad2 / r2, MinRad2), 0.0, 1.0);  // dp3,div,max.sat,mul
+//        p = p * scale + p0;
+//
+//    }
+//    return ((length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters);
+//}
+
+
+float kalibox(vec3 p)
+{
+  /*  vec3 Julia = vec3(0, 0, -.46765);
+    mat3 rotation = vrot(normalize(vec3(1., 1., .19008)), 18.783);
+
+    vec3 Trans = vec3(-0.9712, -2.1223, 0.1079);
+
+    float MinRad2 = 0.3492, Scale = 1.70502;
+
+    int Iterations = 10, ColorIterations = 3;*/
+
+
+    int Iterations = 15;
+    int ColorIterations = 2;
+    /*float MinRad2 = 0.3492;
+    float Scale = 2.04348;
+    vec3 Trans = vec3(0.0365, -1.8613, 0.0365);
+    vec3 Julia = vec3(- 0.6691, -1.3028, -0.45775);
+    mat3 rotation = vrot(normalize(vec3(1., 1., 0)), 0);*/
+
+
+    vec3 Julia = vec3(0, 0, -.46765);
+    mat3 rotation = vrot(normalize(vec3(1., 1., .19008)), 18.783);
+    vec3 Trans = vec3(-0.9712, -2.1223, 0.1079);
+    float MinRad2 = 0.3492, Scale = 1.70502;
+
+  /*  vec3 Julia = vec3(-1.33095, -1.0072, -1.3669);
+    mat3 rotation = vrot(normalize(vec3(0.,0.31405, 0.20661)), 21.9132);
+    vec3 Trans = vec3(-2.2662, -5.0, 0.1799);
+    float MinRad2 = 0.90226, Scale = 2.00718;*/
+
+    float absScalem1 = abs(Scale - 1.0);
+    float AbsScaleRaisedTo1mIters = pow(abs(Scale), float(1 - Iterations));
+
+    vec4 q = vec4(p, 1), c = vec4(Julia, 1);  // p.w is the distance estimate
+    vec4 scale = vec4(Scale, Scale, Scale, abs(Scale)) / MinRad2;
+
+
+    for (int i = 0; i < Iterations; i++)
+    {
+        q.xyz = mul(rotation, q.xyz);
+        //q.xyz = mul(q.xyz,rotation);
+        q.xyz = abs(q.xyz) + Trans;
+        float r2 = dot(q.xyz, q.xyz);
+
+        if (i < ColorIterations)
+            orbitTrap = min(orbitTrap, abs(vec4(q.xyz, r2)));
+
+        q *= clamp(max(MinRad2 / r2, MinRad2), 0.0, 1.0);  // dp3,div,max.sat,mul
+        q = q * scale + c;
+
+    }
+    return ((length(q.xyz) - absScalem1) / q.w - AbsScaleRaisedTo1mIters);
+}
+
+vec2 gun(vec3 p)
+{
+    vec3 q = p;
+    vec2 res = vec2(1e9);
+    q.xy = polar_rep(p.xy, 3.);
+    res.x = vcylinder(abs(q - vec3(.2, 0, 0)) - vec3(0.1, 0, 0), .1, .2);
+    q.xz = polar_rep(p.xz, 4.);
+
+    //res.x = stairMin(res.x, vcylinder(q - vec3(.2, 0, 0), .05, .2), .1, 5.);
+    res.x = stairMin(res.x, lego((q - vec3(.2, 0, 0)) * 8).x / 8., .1, 5.);
+    return res;
+}
+
+vec2 ball(vec3 p)
+{
+#if 0
+    vec3 q = p;
+    q.z -= 4.;
+    q.y -= 1.;
+    q.z = mod(q.z, 6.) - 3.;
+    //rot22(q.yz, 4.);
+    q.xy = polar_rep(q.xy, 10.);
+    float d = vcylinder(abs(q - vec3(3, 0, 0.)) - vec3(0.2, 0, 0), .8, .09);
+    //float d = lego((abs(q - vec3(3, 0, 0.)) - vec3(0.2, 0, 0))*4.).x/4.;
+
+    q.yz = polar_rep(q.yz, 10.);
+
+    //q.yz = polar_rep(q.yz, 3.);
+    //q.xy = polar_rep(q.xy, 6.);
+    //q.xz = polar_rep(q.xz, 3.);
+
+    // res.x = stairMin(res.x, vcylinder(abs(q - vec3(3., 0., 0.)) - vec3(.2, 0, 0), .05, .2), .1, 5.);
+    d = stairMin(d, triPrism((abs(q - vec3(3, 0., 0.)) - vec3(0.2, 0, 0)) * 15, vec2(1,1.)).x / 15., .3, 5.);
+    //d = stairMin(d, vcylinder(q - vec3(3, 0, 0), .54, .3 - .3 * sin(q.y + 1.)), .3, 5.);
+
+
+    vec3 q = p;
+    //q.x-= 10.;
+    q.y += 1.1;
+    float d = vcylinder(q-vec3(6.,0,0), 10., 0.2);
+    //q.xz = polar_rep(q.xz, 4.);
+    //q.xz = polar_rep(q.xz, 2.);
+    q.xz = polar_rep(q.xz, 5.);
+    q.yz = polar_rep(q.yz, 10.);
+    //q.xy = polar_rep(q.xy, 5.);
+    //q.y = mod(q.y, 1.) - .5;
+    //d = stairMin(d, triPrism((q - vec3(4., 0., 0.)) * 15, vec2(1,1.)).x / 15., .5, 10.);
+    //d = stairMin(d, lego((q - vec3(4., 0., 0.)) * 15).x / 15., .3, 10.);
+    d = stairMin(d, gun((q - vec3(6., 0., 0.)) * 1.).x / 1., .05, 10.);
+    
+#endif
+
+    vec3 q = p;
+    q.y += 1.1;
+    float d = 1e9;
+    q.xz = polar_rep(q.xz, 4.);
+    //q.xy = polar_rep(q.xy, 1.);
+    d = stairMin(d, gun((q - vec3(5., 0., 0.)) * 1.).x / 1., .05, 10.);
+    d = min(d, vcylinder(q - vec3(5., 0, 0), 10., .2));
+ 
+    return vec2(d,0);
+}
+vec3 HemisphericalFibonacci(float j)
+{
+    float phi = 2. * PI * j * (2. / (3. - sqrt(5.)));
+    float theta = acos(1. - (2. * j + 1.) / (2. * 8.));
+    return vec3(sin(theta) * cos(phi), -sin(theta) * sin(phi), cos(theta));
+}
+float drawShape(in vec3 p) {
+
+    // Wrappable circle distance. The squared distance, to be more precise.
+    p = fract(p) - .5;
+    return length(p )-.3;
+
+    // Other distance metrics.
+
+    //p = abs(fract(p)-.5);
+    //p = pow(p, vec2(8.));
+    //return pow(p.x+p.y, .125)*.25;
+
+    //p = abs(fract(p)-.5);
+    //p *= p;
+    //return max(p.x, p.y);
+
+    //p = fract(p)-.5;
+    //float n = max(abs(p.x)*.866 + p.y*.5, -p.y);
+    //return n*n;
+
 }
 
 
 vec2 map(vec3 p)
 {
-    vec2 res; 
-    vec2 d0 = vec2(cutSphere(vec3(sabs(p.x,.1)-.5,p.yz), 2.5, 0.), 0.);
-    d0.x = smax(d0.x, -box(vec3(abs(p.x) - 3.8, p.yz), vec3(1,5,5)),.2);
-     
-    vec2 d1 = vec2(1e9, 0);
-    vec3 q;// = p.xyz + vec3(0, -.2, 4.2);
+    vec2 res=vec2(1e9);
+    vec3 q;
+
+#if 1
+
+  
+    //res.x = stairMin(res.x, skull((p - vec3(0., 6., 21))*.2).x/.2, .6, 3.);
+    //res = opU(res, kalibox((p-vec3(-10,-75,60))*.025)/.025, MAT_STONE);
+
+    //return res;
+    
+    //p.y -= 2.;
+    opU(res, cutSphere(vec3(sabs(p.x,.1)-.5,p.yz), 2.5, 0.), MAT_SHELL);
+    res.x = smax(res.x, -box(vec3(abs(p.x) - 3.8, p.yz), vec3(1,5,5)),.2);
     for (float i = 0.; i < 9.; i+=1.)
     {
-
         float a = PI / 9. * i;
         q = p.xyz + vec3(0,-.6,i>0.?.1:.4) - vec3(0, sin(a), -cos(a) * 1.3) * 1.8;
 
         q.yz = rot2(q.yz,i>0.?a:PI/3.);
 
         float k = 1. - .8 * sin(q.y*q.y);
-        d1.x = min(d1.x, vcylinder(q * vec3(k, 1, k), .3, .3)/k -.03 - noise(q * 5.5 - vec3(i)) * .05 - .002 * noise(q * 50.));
+        opU(res, vcylinder(q * vec3(k, 1, k), .3, .3)/k -.03 - noise(q * 5.5 - vec3(i)) * .05 - .002 * noise(q * 50.), MAT_BONE);
         q.yz -= vec2(.4,.2);
-        d1.x = min(d1.x, vcylinder(q, .2, .2)- .03 - .002 * noise(q * 50.));
+        opU(res, vcylinder(q, .2, .2)- .03 - .002 * noise(q * 50.), MAT_BONE);
       }
 
-    if (d1.x < d0.x)d0 = d1;
 
     //q = p;
-    //d0 = vec2(1e10, 0);
-    //for (float i = 0.; i < 4.; i += 1.)
-    //{
-    //    //q = p;
-
-    //    //q.yz = rot2(p.yz, iGlobalTime);
-    //    q = p;
-    //    q += vec3(0, i * 2., 0.);
-    //    q.yz = rot2(q.yz, iGlobalTime);
-
-    //    d0.x = min(d0.x,rbox(q, vec3(.5), 0.1));
-
-    //    //q.y += 1.;
-
-    //}
-    //
-
+    //q.x = abs(q.x) - 1.;
+    //opStairU(res, length(q- vec3(1.,2.,.5)) - 1., 1.4, 10., MAT_METAL);
+    //opStairU(res, drawShape(q), .4, 10., MAT_METAL);
 
     // skull
-    //d0.x = min(head((p+vec3(0,.5,3.2))*2.)/2., d0.x);
-    d0.x = min(d0.x, skull(p+vec3(0.,-.5,3.2)).x);
+    opU(res, skull(p+vec3(0., -.5, 3.2)), MAT_METAL);
+ 
+    // left arm
+    opU(res, lego((p.xzy + vec3(3.2,0,-.4))*2.).x/2., MAT_METAL);
 
-
-    d0.x = min(d0.x, box(p + vec3(3.1, -.4, 0), vec3(.6,.4,.6)));
-
-    d1.x = vcylinder(p+vec3(3.2,-1.4,0), .8, .3);
-    d0.x = fOpUnionStairs(d0.x, d1.x,.1,2.);
+    opStairU(res, vcylinder(p + vec3(3.2, -1.4, 0), .8, .3), .2, 2., MAT_METAL);
 
     q = p;
     rot22(q.yz, .6);
-    d1.x = fOpUnionStairs(box(q + vec3(4., .1, .3), vec3(.15, 1., .4)), vcylinder(p.yxz + vec3(-.4, 3.9, 0), .2,.2), .1,2.);
-    d0.x = fOpUnionStairs(d0.x, d1.x, .1,3.);
+
+    opStairU(res, lego((q + vec3(4.4, .1, .0)) * 2.).x / 2., .1, 3., MAT_METAL);
+    opStairU(res, vcylinder(p.yxz + vec3(-.4, 3.9, 0), .2, .2), .5, 10., MAT_METAL);
+   /* res.x = stairMin(res.x,
+        stairMin(lego((q + vec3(4.4, .1, .0)) * 2.).x / 2., vcylinder(p.yxz + vec3(-.4, 3.9, 0), .2, .2), .5, 10.),
+        .1,3.);*/
+
     rot22(q.yz, -1.3);
-    d0.x = fOpUnionStairs(d0.x, min(vcylinder(q + vec3(4.4, -1, .6), 2.5, .1), vcylinder(q+vec3(4.4,-2.8,.6),.2,.2)), .1, 2.);
+    opStairU(res, min(vcylinder(q + vec3(4.4, -1, .3), 2.5, .1), vcylinder(q + vec3(4.4, -2.8, .3), .2, .2)), .4, 10., MAT_METAL);
+    //res.x = stairMin(res.x, min(vcylinder(q + vec3(4.4, -1, .3), 2.5, .1), vcylinder(q+vec3(4.4,-2.8,.3),.2,.2)), .4, 10.);
 
-    // saw 附件
-    d1.x = fOpUnionStairs(vcylinder(q.yxz + vec3(-4.3, 4.4, .6), .1, .5), vcylinder(q.xyz + vec3(4.4, -3.6, .6), .3, .2), .2,2.);
-    d1.x = fOpUnionStairs(d1.x, max(vcylinder(q.yxz + vec3(-4.3, 4.4, .6), .5, .15), -vcylinder(q.yxz + vec3(-4.3, 4, .6), .3, .1)), .15, 3.);
-
-    d0.x = min(d0.x,d1.x);
+    // saw 连杆与转盘
+    opStairU(res, vcylinder(q.yxz + vec3(-4.3, 4.4, .3), .1, .5), .2, 2., MAT_METAL);
+    opStairU(res, vcylinder(q.xyz + vec3(4.4, -3.6, .3), .3, .2), .2, 2., MAT_METAL);
+    opStairU(res, max(vcylinder(q.yxz + vec3(-4.3, 4.4, .3), .5, .15),
+        -vcylinder(q.yxz + vec3(-4.3, 4, .3), .3, .1)), .15, 3., MAT_METAL);
+   /* float d = stairMin(vcylinder(q.yxz + vec3(-4.3, 4.4, .3), .1, .5), vcylinder(q.xyz + vec3(4.4, -3.6, .3), .3, .2), .2,2.);
+    res.x = min(res.x,
+                stairMin(d, max(vcylinder(q.yxz + vec3(-4.3, 4.4, .3), .5, .15),
+                                -vcylinder(q.yxz + vec3(-4.3, 4, .3), .3, .1)),
+                         .15, 3.));*/
 
 
     // saw
-    q = p.zyx + vec3(3.2, -2.9, 4.7);
+    q = p.zyx + vec3(3., -3.1, 4.9);
+    vec3 qq = q;
+    q.x *= -1.;
     q.xy = polar_rep(q.xy, 5.);
-    //q.x -= 1.;
+    qq.xy = polar_rep(qq.xy, 5.);
+    q.xy = polar_rep(q.xy, 2.);
+
     rot22(q.xy, 4.7);
+    q.z = abs(q.z) - .1;
 
-    d0.x = min(d0.x,.8*max(triPrism(q.xyz*vec3(1,.6,1), vec2(.4, .04-sin(q.y*5.5+4.)*.037)), -vcylinder(q-vec3(.1,0,0), .5, .08)));
-    //d0.x = max(vcylinder(q, .1, 1.), -vcylinder(q+vec3(.9,0,0), .2, .8));
-
-
+    opU(res, .8 * max(triPrism(q.xyz * vec3(1, .6, 1), vec2(.4, .04 - sin(q.y * 5.5 + 4.) * .037)), -vcylinder(q - vec3(.1, 0, 0), .5, .08)), MAT_METAL);
+    //opStairU(res, lego(q.xzy*12.).x/12., .1, 5., MAT_METAL);
+    opStairU(res, lego(qq.xzy*15.).x/15., .1, 5., MAT_METAL);
+    //opStairU(res, lego(q.xzy*15.).x/15., .05, 5., MAT_METAL);
+    //opStairU(res, vcylinder(q, .1, .08), .1, 9., MAT_METAL);
+    //opStairU(res, box(q,vec3(.2,.1,.08)), .05, 9., MAT_METAL);
+   
     // cannon
     q = p + vec3(3.2,-2.2,0);
     rot22(q.xz, -.2); 
-    d0.x = min(d0.x, lego(q*2.5).x/2.5);
+    opU(res, lego(q*2.5).x/2.5, MAT_METAL);
     rot22(q.xz, 1.);
-    d0.x = min(d0.x, lego((q+vec3(0,-1.2,0)) * 2.5).x / 2.5);
-    d0.x = fOpUnionStairs(vcylinder(q.xzy+vec3(0,2.5,-1.2),.3,.3), fOpUnionStairs(d0.x, max(-q.z - 4.8, abs(vcylinder(q.xzy + vec3(0, 2., -1.2), 3., .2)) - .02), .5, 4.), .2, 2.);
+    opU(res, lego((q + vec3(0, -1.2, 0)) * 2.5).x / 2.5, MAT_DARKMETAL);
+    opStairU(res, vcylinder(q.xzy + vec3(0, 2.5, -1.2), .3, .3), .2, 2., MAT_DARKMETAL);
+    opStairU(res, max(-q.z - 4.8, abs(vcylinder(q.xzy + vec3(0, 2., -1.2), 3., .2)) - .02), .5, 4., MAT_DARKMETAL);
 
     // right arm
     q = p - vec3(3.3, .7, -.8);
-    d0.x = fOpUnionStairs(d0.x, lego(q.yxz*2.5).x/2.5, .3,2.);
-    d0.x = fOpUnionStairs(d0.x, lego(q * 2.5-vec3(.3,3.,0)).x / 2.5, .2, 2.);
-    d0.x = fOpUnionStairs(d0.x, vcylinder(q.yxz-vec3(1,1,0), 3., .2), .2, 3.);
+    opStairU(res, lego(q.yxz*2.5).x/2.5, .3,2., MAT_METAL);
+    opStairU(res, lego(q * 2.5-vec3(.3,3.,0)).x / 2.5, .2, 2., MAT_METAL);
+    opStairU(res, vcylinder(q.yxz-vec3(1,1,0), 3., .2), .2, 3., MAT_METAL);
     rot22(q.yz, -.5);
-    d0.x = fOpUnionStairs(d0.x, lego(q.yxz * 2.5 - vec3(2.2, 9, 1.2)).x / 2.5, .2, 2.);
-    d0.x = fOpUnionStairs(d0.x, min(lego(q * 2.5 - vec3(9,2,-.5)).x / 2.5, vcylinder(q.yzx-vec3(.8,0,3.6), 1.5, .15)), .2, 2.);
+    opStairU(res, lego(q.yxz * 2.5 - vec3(2.2, 9, 1.2)).x / 2.5, .2, 2., MAT_METAL);
+    opStairU(res, min(lego(q * 2.5 - vec3(9,2,-.5)).x / 2.5, vcylinder(q.yzx-vec3(.8,0,3.6), 2., .15)), .3, 5., MAT_METAL);
     rot22(q.xy, .8);
-    d0.x = fOpUnionStairs(d0.x, lego(vec3(abs(q.x - 2.8), q.y, q.z * 2.) * 2.5 - vec3(1, -5.3, -7)).x / 5., .2, 2.);
-    d0.x = fOpUnionStairs(d0.x, vcylinder(q.yxz+vec3(2.1,-2.5,1.2), 2., .1), .3, 18.);
+    legoLen=.5;
+    // right fore arm
+    q.z += .5;
+    opStairU(res, lego(vec3(abs(q.x - 2.8), q.y, q.z) * 2.5 - vec3(1.3, -5.3, -3.5)).x / 2.5, .6, 10., MAT_METAL);
+    legoLen=1.;
+    opStairU(res, vcylinder(q.yxz+vec3(2.1,-2.5,1.2), 2., .1), .5, 18., MAT_METAL);
     // sword
-    d0.x = fOpUnionStairs(d0.x, vcylinder(q.yxz + vec3(2.1, -2.5, 1.5), 2., .1), .3, 4.);
+    opStairU(res, vcylinder(q.yxz + vec3(2.1, -2.5, 1.5), 2., .1), .3, 4., MAT_METAL);
 
-    //d0.x = min(d0.x, lego(q.yxz * 2.5 - vec3(2.2, 9, 1.2)).x / 2.5);
+    //res.x = min(res.x, lego(q.yxz * 2.5 - vec3(2.2, 9, 1.2)).x / 2.5);
     //rot22(q.xz, 1.);
-    d0.x = fOpUnionStairs(d0.x, sword((q.zxy+vec3(2.1,.6,-1.5))*.8).x/.8, .3,2.);
-    //d0.x = sword(p).x;
-    //d0.x = lego(p).x;
+    opStairU(res, sword((q.zxy+vec3(2.1,.6,-1.5))*.8).x/.8, .3,2., MAT_METAL);
+    //res.x = sword(p).x;
+    //res.x = lego(p).x;
 
     // belly and legs
     q = p;// +vec3(0., 2, 0);
-    d0.x = fOpUnionStairs(d0.x, cutSphere(vec3(p.x,-p.y+.2,p.z), 1.5, .5), 1.3, 5.);
+    opStairU(res, cutSphere(vec3(p.x,-p.y+.2,p.z), 1.5, .5), 1.3, 5., MAT_METAL);
     rot22(q.xz, -.4);
     q.xz = polar_rep(q.xz, 2.);
-    d0.x = fOpUnionStairs(d0.x, vcylinder(q.yxz - vec3(-1,1.5,0), 1.5, .15), .2, 3.);
-    //d0.x = vcylinder(q.yxz-vec3(-1,1.5,0), 1.5, .15);
+    opStairU(res, vcylinder(q.yxz - vec3(-1,1.5,0), 1.5, .15), .2, 3., MAT_METAL);
+    //res.x = vcylinder(q.yxz-vec3(-1,1.5,0), 1.5, .15);
     rot22(q.xy, .4);
-    d0.x = fOpUnionStairs(d0.x, vcylinder(q - vec3(2.5, -2.5, 0), 1., .1-.1*sin(q.y-.1)), .2, 4.);
-    //d0.x = fOpUnion
-    res = d0;
+    opStairU(res, vcylinder(q - vec3(2.5, -2.5, 0), 1., .1-.1*sin(q.y-.1)), .2, 4., MAT_METAL);
+    //res.x = fOpUnion
+
+#endif
+    // room
+    //res.x = min(res.x, -rbox(p, vec3(50.,5.,50.), .5));
+    //return res;
+    // plane
+    //res.x = min(res.x, p.y + 2.3);
+    vec2 res2 = vec2(1e9);
+    p.xz -= 250.;
+    p.x = mod(p.x, 500.) - 250.;
+    p.z = mod(p.z, 500.) - 250.;
+    
+    opU(res2, vcylinder(p + vec3(0, 12.35, 0), 10., 50.), MAT_DARKMETAL);
+
+    q = p;
+    //q.xz = polar_rep(q.xz, 5.);
+    float id;
+    q.xz = fold(q.xz, 5.,id);
+    q.z -= 20.;
+    q.xz = fold(q.xz, 5. ,id);
+    q.z -= 7.;
+  /*  q.xz = fold(q.xz, 4.,id);
+    q.z -= 20.;
+    q.xz = fold(q.xz, 4. ,id);
+    q.z -= 8.;*/
+
+    //opCut(res2, rbox(vec3(mod(q.x, 10.) - 5., q.y+2., q.z), vec3(.1, .5, 100.), .1), MAT_DARKMETAL);
+    //opCut(res2, rbox(vec3(q.x, q.y+2., mod(q.z, 16.) - 8.), vec3(100., .4, .1), .1), MAT_DARKMETAL);
+    opCut(res2, rbox(vec3(mod(q.x, 10.) - 5., q.y+2., q.z), vec3(.2, 1.5, 100.), .1), MAT_DARKMETAL);
+    opCut(res2, rbox(vec3(q.x, q.y+2., q.z), vec3(100., 1.5, .1), .2), MAT_DARKMETAL);
+    opStairU(res2, max(p.y - 2., abs(vcylinder(p - vec3(0, 5, 0), 10., 50.)) - 1.)
+        , 1., 3., MAT_DARKMETAL);
+    opU(res2, vcylinder(p + vec3(0, 12.8, 0), 10., 50.), MAT_LAVA);
+    res2.x += fbm(p * .5) * 0.1;
+    opU(res, res2.x, res2.y);
+
+    opStairU(res, ball(p * .1).x / .1,  1., 5., MAT_METAL);
+    //opStairU(res, gun((p - vec3(0, 5, 30)) * .2).x / .2, 2., 5., MAT_STONE);
+    //res = res;
     return res;
 }
 
-vec2 map2(vec3 p) 
-{ 
-    vec3 pos = p;
-    // It was iq's watermelon:  https://www.shadertoy.com/view/ldl3zl
-    vec3 c = p;
-    float r = 2.0 - 0.007 * sin(10.0 * (-c.x + c.y - c.z));
-    vec2 d0 = vec2(0.65 * (length(3.0 * c * vec3(1., 1.5, 1.5)) - r) / 3.0, 3.0);
-
-    vec3 q = vec3(p.x, abs(p.y) - .22, abs(p.z) - .22);
-    q.yz = rot2(q.yz, -0.5);
-    vec2 d1 = vec2(box(q + vec3(0.55, 0., 0.), vec3(0.22, 0.1, 0.01)), 1.); 
-
-    float t1 = cylinder(vec3(p.z + 0., p.x + .8, p.y), vec2(.2, .09));
-    float t2 = cylinder(vec3(p.z, p.x + .8, p.y), vec2(.18, .15));
-    vec2 d2 = vec2(max(t1, -t2), 3.0);
-
-    p.x += .7;
-    t1 = cylinder(p.zxy, vec2(.45, .19));
-    t2 = cylinder(p.zxy, vec2(.42, .21));
-    rx(p, 0.785);
-    q = vec3(p.x + .1, abs(p.y) - .26, abs(p.z) - .26);
-    q.yz = rot2(q.yz, 0.785);
-    float t3 = box(q, vec3(0.1, 0.12 + 0.02 * sin(10. * -q.x), 0.15));
-    float t = max(t1, -t2);
-    t = smax(t, -t3, 0.1);
-    vec2 d3 = vec2(t, 3.0);
-
-    p = pos;
-    vec2 d4 = vec2(cylinder(p.yxz + vec3(0., -0.1, 0.),
-        vec2(.46 - 0.02 * sin(10. * p.x), .07)), 1.);
-    vec2 d5 = vec2(cylinder(p.yxz + vec3(0., 0.2, 0.),
-        vec2(.41 - 0.04 * sin(10. * p.x), .04)), 3.);
-
-    rx(p, -0.5);
-    vec2 d6 = screw(p);
-    vec2 d7 = screw(p.xzy);
-
-    vec2 d = d0;
-    d = smerge(d, d4, .07);
-    d = smerge(d, d5, .06);
-    d = merge(d, d6);
-    d = merge(d, d7);
-    d = merge(d, d1);
-    d = merge(d, d2);
-    d = merge(d, d3);
-    return d;
-}
-
-
-void getMaterial(float id, vec3 p, out vec3 albedo, out float roughness, out float metallic)
+float getAO(vec3 p, vec3 n)
 {
-   
-    albedo = vec3(0.972, 0.960, 0.915);
-    roughness = .99;
-    metallic = 1.;
-    
+    float occ = .0, sca = 4., h, d;
+    for (int i = 0; i < 5 && occ < .35; i++, sca *= .95)
+    {
+        h = 1e-5 + .1 * float(i) / 4.;
+        d = map(p + h * n).x;
+        occ += (h - d) * sca;
+    }
+
+    return clamp(1. - 3. * occ, .1, 1.);// *(.5 + .5 * n.y);
+}
+vec3 firecolor(float f)
+{
+    f = f * f * (3.0 - 2.0 * f);
+    return  min(vec3(f + .8, f * f * 1.4 + .1, f * f * f * .7) * f, 1.0);
+}
+void getMaterial(float id, vec3 p, inout vec3 n, out vec3 albedo, out float roughness, out float metallic)
+{
+    if (id == MAT_METAL)
+    {
+        albedo = vec3(0.972, 0.960, 0.915);
+        // gold
+        //albedo = vec3(242, 192, 86)/255.;
+        // steel
+        //albedo = vec3(220, 220, 220)/255.;
+        //raw gold
+        //albedo = vec3(255, 180, 66)/255.;
+        // 24k gold
+        //albedo = vec3(218, 178, 115)/255.;
+        // iron
+        albedo = vec3(118, 119, 120) / 255.;
+        roughness = .39;
+        metallic = 1.;
+    }
+    else if (id == MAT_SHELL)
+    {
+        //albedo = vec3(.4, .0, .0);
+
+        albedo = vec3(143, 20, 10) / 255.;
+        for (int i = 0; i < 10; ++i)
+        {
+            vec3 pp = HemisphericalFibonacci(float(i));
+            pp = pp.xzy;
+            pp.z *= -1.;
+
+            albedo = mix(vec3(.001), albedo, smoothstep(0., .01, length(p-pp*2.5)-.5));
+        }
+        roughness = 0.5;
+        metallic = 1.;
+    }
+    else if (id == MAT_STONE)
+    {
+        albedo = vec3(0.118, 0.051, 0.024);
+        roughness = .9;
+        metallic = 0.;
+    }
+    else if (id == MAT_BONE)
+    {
+        albedo = vec3(0.972, 0.960, 0.915)*.5;
+        roughness = .5;
+        metallic = 0.;
+    }
+    else if (id == MAT_DARKMETAL)
+    {
+        float d = max(0., fbm(p.xz * .5) - .5);
+        albedo = mix(vec3(.1,.1,.1),vec3(.2,.1,.0), d*2.);
+        roughness = mix(0.01, .8, d);
+        metallic = 1.;
+    }
+    else if (id == MAT_LAVA)
+    {
+        vec2 q = p.xz;
+        //q = polar_rep(q, 5.);
+        albedo = vec3(.2,.005,.0) * 100. * max(fbm(q * vec2(5.,20.))-.4,0.);
+        albedo = mix(albedo, vec3(.2, .005, .0) * 1e3, max(0.,fbm(q * 4.)-.44));
+        roughness = .9;
+        metallic = 0.;
+    }
+    else
+    {
+        albedo = vec3(1, 0,1);
+        roughness = 0.4;
+        metallic = 1.;
+    }
+
+    if (metallic == 1.)
+    {
+        float ao = getAO(p, n);
+        float f = texFbm(p * vec3(4, 2, 4), n);
+        //ao *= ao;
+        //ao = smoothstep(0., .3, ao);
+        //f = smoothstep(.7, .8, f) * (1. - ao);
+        f = id == MAT_METAL ? smoothstep(.3, .4, f) * max(0., 1. - ao * 1.) : smoothstep(.7, .8, f);
+        roughness += f*2.;
+        albedo = mix(albedo, vec3(.6, .12, .02)*0.3, min(1.,f));
+        metallic =mix(metallic,0.,min(1.,f*5.));
+        //metallic = mix(metallic, 0., f);
+        n = bumpMapping(p, n, 0.05*f);
+
+        float k = texFbm(p * vec3(500, 1., 1.), n);
+        k = smoothstep(.4, .5, k);
+        roughness = min(1., mix(roughness * 2., roughness, k));
+    }
 }
 
 vec3 getNormal(vec3 p, float t)
@@ -887,11 +1073,14 @@ float shadow(vec3 sro, vec3 srd)
 }
 
 
-static vec3 sunDir = normalize(vec3(-.7, 1, -.1));
-static vec3 sunCol = vec3(1);
+//static vec3 sunDir = normalize(vec3(-.7, 1, -.5));
+static vec3 sunDir = normalize(vec3(-1.,.5,-.5));
+static vec3 sunCol = vec3(.7,.6,.5)*4.;
+static float glow;
 
 vec2 intersect()
 {
+    glow = 0.;
     float rnd = .9 + .1 * hash21(seed++).x;
     float t = .01;
     vec2 res = vec2(1e9);
@@ -911,6 +1100,11 @@ vec2 intersect()
             break;
         }
 
+        if (res.y == MAT_LAVA)
+        {
+            glow += 0.2 / (0.15 + abs(res.x));
+        }
+
         t += res.x;
     }
     if (!hit) t = -1.;
@@ -924,8 +1118,8 @@ vec3 phongBrdf(vec3 toLight, vec3 toEye, vec3 normal, vec3 albedo, vec3 F, float
 {
     vec3 wr = reflect(-toLight, normal);
     vec3 diff = (vec3(1) - F) * albedo / PI;
-    vec3 spec = F * ((shininess + 2.) / (2. * PI)) *
-        pow(max(0., dot(wr, toEye)), shininess);
+    vec3 spec = min(vec3(.99),F * ((shininess + 2.) / (2. * PI)) *
+        pow(max(0., dot(wr, toEye)), shininess));
 
     return diff * (1. - metallic) + spec;
 }
@@ -943,9 +1137,8 @@ vec3 ImportanceSampleBlinn(vec3 n, vec2 E, float power, out float pdf)
     float SinTheta = sqrt(abs(1 - CosTheta * CosTheta));
 
     vec3 sampleDir = cos(Phi) * SinTheta * o1 + sin(Phi) * SinTheta * o2 + CosTheta * n;
-
+    
     pdf = (power + 2.) / (2. * PI) * pow(CosTheta, power);
-
     return sampleDir;
 }
 
@@ -1002,15 +1195,22 @@ vec3 renderCloud(vec2 uv)
     return sum.xyz;
 }
 
-vec3 getBackGround(float t)
+vec3 getBackGround(vec3 rd, float t)
 {
+#if 0
     vec3 pos = ro + 1000. * rd;
     vec2 uv = pos.xz;
     vec3 cloud = renderCloud(uv);
     vec3 sky = cloud * vec3(.5,.5,.6);;
     sky = mix(sky, vec3(1, .2, 0), smoothstep(.1, 1., dot(cloud, cloud)));
+#endif
 
-    //sky = mix(vec3(0, .5, 1) * .0005, sky, smoothstep(0., 1., length((uv - vec2(.3, .4)) * vec2(.5, 1)) - .1));
+    vec3 p = ro + 10. * rd;
+    vec3 sky = 5.*mix(firecolor(.2), firecolor(.5), max(0.,fbm(p * 1.0)-.2));
+    sky *= smoothstep(1., 15., p.y);
+    //sum.xyz = mix(sum.xyz, skyCol * 0.1, 1. - smoothstep(-1., 400., (ro + 2000. * rd).y));
+    //sky += 10.75 * sunCol * pow(clamp(dot(sunDir, rd), 0.0, 1.0), 10.0);
+        //sky = mix(vec3(0, .5, 1) * .0005, sky, smoothstep(0., 1., length((uv - vec2(.3, .4)) * vec2(.5, 1)) - .1));
     //return vec3(1.);
     return sky;
 }
@@ -1025,14 +1225,22 @@ vec3 scene(vec2 uv)
     //return sky;
     // 
     // bounces
+    float t = 0.;
+    vec2 prevHit;
     for (int i = 0; i < MAX_BOUNCES; ++i)
     {
         vec2 hit = intersect();
+        if (i == 0)
+            t = hit.x;
+        if (i != 0 && hit.y == MAT_LAVA && prevHit.y!=MAT_DARKMETAL)
+            break;
+        prevHit = hit;
+
         q = pos = ro + hit.x * rd;
 
         if (hit.x < 0.)
         {
-            Lo += throughput * getBackGround(hit.x);// (i == 0 ? sky : vec3(.01, .5, 1.) * .01);
+            Lo += throughput * getBackGround(rd, hit.x);// (i == 0 ? sky : vec3(.01, .5, 1.) * .01);
             //Lo *= sky;
             break;
         }
@@ -1040,9 +1248,9 @@ vec3 scene(vec2 uv)
         n = getNormal(pos, hit.x);
         
 
-        getMaterial(hit.y, pos, albedo, roughness, metallic);
-        roughness = .3;
-        metallic = 1.;
+        getMaterial(hit.y, pos, n, albedo, roughness, metallic);
+        //roughness = .3;
+        //metallic = 1.;
         //float shininess = 100. / (500. * roughness + .01);
         float shininess= max(2. / (roughness * roughness) - 2., .01) + 1.;
 
@@ -1060,25 +1268,40 @@ vec3 scene(vec2 uv)
         float pdf = 1.;
         //nextRd = normalize(ImportanceSampleBlinn(refl, hash2(seed), shininess, pdf));
 
-        if (hash1(seed) < length(F) + metallic)
+        //if (hash1(seed) < length(F) + metallic)
+        if(true)
         {
+#if 0
+            if (roughness < 0.01)
+            {
+                nextRd = normalize(refl);
+            }
+            else
+#endif
             nextRd = normalize(ImportanceSampleBlinn(refl, hash2(seed), shininess, pdf));
         }
         else
-        { // Diffuse
+        {
+            // Diffuse
             nextRd = normalize(ImportanceSampleBlinn(n, hash2(seed), 1., pdf));
-
         }
 
         if (pdf < EPSILON || dot(nextRd, n) < 0.) break;
+        
+        throughput *= phongBrdf(nextRd, -rd, n, albedo, F, shininess, metallic) * dot(nextRd, n) / min(1.,pdf);
+
+        // 还是得放在 throughput 赋值之后, 不然还是会有超小 pdf 导致的大 throughput, 出现亮点
         if (throughput.x > 1. || throughput.y > 1. || throughput.z > 1.)
             break;
-        throughput *= phongBrdf(nextRd, -rd, n, albedo, F, shininess, metallic) * dot(nextRd, n) / pdf;
-
         rd = nextRd;
         ro = pos + .002 * n;
+
+
+        //float ao = getAO(pos, n);
+        //Lo = vec3(1) * ao; break;
     }
 
+    //Lo = mix(Lo, firecolor(.3), 1. - exp(-.0005  * t));
     return Lo;
 }
 
@@ -1087,17 +1310,17 @@ vec4 mainImage(vec2 fragCoord)
     if (iCameraDirty > 0.)
     {
         MAX_BOUNCES = 1;//  iCameraDirty > 0. ? 3 : 3;
-        MARCHING_STEPS = 128;// iCameraDirty > 0. ? 128 : 1024;
+        MARCHING_STEPS = 64;// iCameraDirty > 0. ? 128 : 1024;
         MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
 
         // only update 1 out of 4 pixels when moving camera
-        if (any((uint2(fragCoord)) % 2 != 0))
+        if (any((uint2(fragCoord)) % 4 != 0))
             return vec4(0, 0, 0, 1);
     }
     else
     {
         MAX_BOUNCES = 2;//  iCameraDirty > 0. ? 3 : 3;
-        MARCHING_STEPS = 1024;// iCameraDirty > 0. ? 128 : 1024;
+        MARCHING_STEPS = 256;// iCameraDirty > 0. ? 128 : 1024;
         MARCHING_STEP_SCALE = 1.;// iCameraDirty > 0. ? 5. : 1.;
     }
 
@@ -1126,6 +1349,13 @@ vec4 mainImage(vec2 fragCoord)
 
     vec3 finalCol = scene(p);
     float k = 1.;
+
+    //finalCol = vec3(1) * fbm(fbm(p*1.) * vec2(10, 100.));
+
+    //float f = fbm(p.xy * vec2(1, 100.));
+    //finalCol = smoothstep(.3,.4,f) * vec3(1.);
+
+    //finalCol = vec3(1.) * fbm(p.xy * vec2(1.,.15) * 100.);
 
     if (iFrame > 0. && iCameraDirty == 0. && iAccumulationRestart == 0.)
     {
