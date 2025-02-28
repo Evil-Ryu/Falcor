@@ -47,8 +47,10 @@ void ShaderEditor::resetCamera()
 {
     auto camera = mCameras[0];
    
-    camera->setPosition(float3(0, 0, -3));
-    camera->setTarget(float3(0,0,0));
+    //camera->setPosition(float3(0, 0, -3));
+    //camera->setTarget(float3(0,0,0));
+    camera->setPosition(float3(8.9, 6.8, -40.));
+    camera->setTarget(float3(8.6, 6.7, -39));
     // for skybox
     /*camera->setPosition(float3(6.64, 10., -1.79));
     camera->setTarget(float3(6.53, 10.,-2.8));*/
@@ -158,7 +160,8 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Revision2024.slang";
+    //std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Revision2024.slang";
+    std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Ocean2025.slang";
     mPasses[0].mPass = FullScreenPass::create(path0Str);
     mPasses[0].mShaderPath = getFilenameFromPath(path0Str);
 

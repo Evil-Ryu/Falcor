@@ -23,6 +23,7 @@
   </ItemGroup>
   <ItemGroup>
     <ShaderSource Include="Shaders\ColorShiftPost.slang" />
+    <ShaderSource Include="Shaders\Ocean2025.slang" />
     <ShaderSource Include="Shaders\Revision2024.slang" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
