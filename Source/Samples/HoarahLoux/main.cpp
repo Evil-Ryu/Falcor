@@ -3,8 +3,10 @@
 
 #define MAX_PASSES 5
 #define MAX_CONTROLLABLE_VARS 5
-#define DEFAULT_WIDTH 1280
-#define DEFAULT_HEIGHT 720
+//#define DEFAULT_WIDTH 1280
+//#define DEFAULT_HEIGHT 720
+#define DEFAULT_WIDTH 2560
+#define DEFAULT_HEIGHT 1440
 
 //#define DEFAULT_WIDTH 1024
 //#define DEFAULT_HEIGHT 1024
@@ -206,6 +208,7 @@ void ShaderEditor::setCommonVars(FullScreenPass::SharedPtr& pass, float w, float
     pass["ToyCB"]["iResolution"] = float2(w, h);
 
     mTime += (float)gpFramework->getGlobalClock().getDelta();
+
 
 
     pass["ToyCB"]["iGlobalTime"] = mTime;

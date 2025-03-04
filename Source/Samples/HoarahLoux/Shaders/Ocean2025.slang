@@ -64,6 +64,9 @@ layout(binding = 1) texture2D iPass0Output : register(t0);
 #define WATER_DEPTH 0.5
 #define ROUGH_SEA 1
 #define PI 3.1415926535
+#define RAIN 0
+#define RAIN_START_TIME 3.
+#define PANARAMA 1
 
 #define LOOP 1
 static float seed;
@@ -76,6 +79,7 @@ static vec3 skyCol = vec3(0.000, 0.035, 0.122);
 #define MOD3 vec3(.16532,.17369,.15787)
 
 
+static float time;
 
 //--------------------------------------------------------------------------
 
@@ -123,7 +127,7 @@ vec2 hash21(float p)
 float hash12(vec2 p, float freq)
 {
     //p = mod(p, 1./pow(freq,100.));
-    p = mod(p, 1.*freq);
+    //p = mod(p, 10.*freq);
     uvec2 q = uvec2(ivec2(p)) * uvec2(1597334673U, 3812015801U);
     uint n = (q.x ^ q.y) * 1597334673U;
     return float(n) * 2.328306437080797e-10;
@@ -293,7 +297,7 @@ vec2 voronoi(vec2 x)
             vec2  g = vec2(i, j);
             vec2  o = hash2(n + g);
             //vec2  r = g - f + o;
-            vec2  r = g - f + (0.5 + 0.5 * sin(iGlobalTime + 6.2831 * o));
+            vec2  r = g - f + (0.5 + 0.5 * sin(time*5. + 6.2831 * o));
             float d = dot(r, r);
             if (d < m.x)
                 m = vec3(d, o);
@@ -325,13 +329,13 @@ float gerstner(vec2 p, float freq, vec2 phase, float sharpness)
     p *= freq;
     p += noise(p, freq);
     //p=mod(p, 10.);
-    vec2 wave = (1. - vsabs(sin(p), .01 - .01 * sharpness));
+    vec2 wave = (1. - vsabs(sin(p), .005 - .005 * sharpness));
+    //vec2 wave = (1. - abs(sin(p)));
     return pow(wave.x + wave.y, 1.2);
 }
 
 
-
-float water(vec3 pos)
+float waterpartial(vec3 pos)
 {
     vec2 p = pos.xz;
 
@@ -339,10 +343,9 @@ float water(vec3 pos)
 
     //float h = gerstner(p, 2., 1., vec2(1.,0.), 1., iGlobalTime*0.2);
     float amp = 1.;
-    float freq = 1.;
+    float freq = .8;
     float sharpness = 0.;
-    float time = iGlobalTime * 1.2;
-    vec2 offset = vec2(time);
+    vec2 offset = vec2(time*.6);
 
     float h = 0.;
 
@@ -350,7 +353,7 @@ float water(vec3 pos)
     {
         //h += amp * gerstner(freq*(p+time));
         //h += amp * gerstner(freq*(p+time));
-        h += amp * 1. * gerstner(p, 1., -offset * 2., .3);
+        h += amp * 3. * gerstner(p, .3, -offset * 2., .3);
 
         h += amp * gerstner(p, freq, offset, sharpness);
         h += amp * gerstner(p, freq, -offset, sharpness);
@@ -361,14 +364,40 @@ float water(vec3 pos)
         freq *= 2.7;
         p = mul(m2, p);
         offset = mul(m2 * .6, offset);
-        sharpness = .7;
+        sharpness = .5;
         //dir = (m2 * dir);
     }
     //h=1.;
     //h += 1.*texture(iChannel2, p*5.-vec2(0.45,.2)).x * 1.;
 
 
-    return h - 2.;
+    return h - 4.;
+}
+
+
+float water(vec3 pos)
+{
+    float h = 0.;
+    ////if (iGlobalTime < 10.)
+    //if (iFrame < 100.)
+    //{
+    //    time = iFrame;
+    //    h = waterpartial(pos);
+    //}
+    //else
+    //{
+    //    time = 0.;
+    //    float h0 = waterpartial(pos);
+    //    time = 100.;
+    //    float h1 = waterpartial(pos);
+    //    //float t = fract(iGlobalTime);
+    //    float t = (iFrame - 100.) / 20.;
+
+    //    h = mix(h1, h0, t);
+    //}
+
+    h = waterpartial(pos);
+    return h;
 }
 
 
@@ -549,7 +578,7 @@ vec3 render_sky(vec3 ro, vec3 rd)
 float mapCloud(vec3 p)
 {
     p *= .0005;
-    return .6 - fbm3d(p * vec3(1, 1, 1.) + iGlobalTime * .14);// + .5 * fbm(p * 2.5)+ .25 * fbm(p * 5.5);
+    return .6 - fbm3d(p * vec3(1, 1, 1.) + time * .14);// + .5 * fbm(p * 2.5)+ .25 * fbm(p * 5.5);
 }
 
 vec3 renderCloud(vec3 ro, vec3 rd, vec2 uv)
@@ -724,7 +753,7 @@ vec3 render_water(vec3 ro, vec3 rd, float t, vec2 fragCoord, vec3 sky)
     //vec3 scatterCol = scatter * 0.2*vec3(0.000,0.502,0.467) * 
     //                  max(0.0, pos.y+.5);  
 
-    vec3 scatterCol = scatter * 0.2 * vec3(0.459, 0.000, 0.000) *
+    vec3 scatterCol = scatter * 0.2 * vec3(0.3, 0.000, 0.000) *
         max(0.0, pos.y + .5);
 
 
@@ -732,12 +761,13 @@ vec3 render_water(vec3 ro, vec3 rd, float t, vec2 fragCoord, vec3 sky)
     col = mix(refrCol, reflCol, fre);
 
 
-    vec3 speCol = sun_col * 1. * directSpecular(-rd, sun_dir, n, .2);
+    float rough = 0.2 + .7 * smoothstep(300., 400., t);
+    vec3 speCol = sun_col * 1. * directSpecular(-rd, sun_dir, n, rough);
 
     float rnd = (.5 * fbm(pos.xz * 50.) + .5);
-    vec3 foam = voronoi(pos.xz * .4 - iGlobalTime * .3).x * rnd * vec3(1.)
+    vec3 foam = voronoi((pos.xz)*0.2).x * rnd * vec3(.5)
         //+ voronoi(m2*pos.xz*8.+2.+iGlobalTime*2.).x*.15 
-        + voronoi(pos.xz * 5. + iGlobalTime * 4.).x * .5 * rnd;
+        + voronoi((pos.xz)*0.1).x * 1. * rnd;
 
     foam = mix(foam * .01, foam, smoothstep(0.5, 2., n.y) * smoothstep(0.9, 2., pos.y));
 
@@ -781,8 +811,8 @@ vec3 scene(vec3 ro, vec3 rd, vec2 fragCoord, vec2 uv, out float t)
     if (underwater)
     {
         float freq = 3.;
-        rd.x += .05 * fbm3d(vec3(uv.x, iGlobalTime * .15, uv.y * 3.) * freq);
-        rd.y += .15 * fbm3d((vec3(uv.x, iGlobalTime * 2.13, uv.y * 3.) - vec3(7, 115, 137)) * freq);
+        rd.x += .05 * fbm3d(vec3(uv.x, time * .15, uv.y * 3.) * freq);
+        rd.y += .15 * fbm3d((vec3(uv.x, time * 2.13, uv.y * 3.) - vec3(7, 115, 137)) * freq);
         //rd=normalize(refract(rd,vec3(-rd.x,-0.1,-rd.z),1.33));
         rd = normalize(rd);
     }
@@ -910,21 +940,41 @@ float deg2rad(float deg) {
 
 static vec4 faceColors[6];
 
+#define AA 1
 vec4 mainImage(vec2 fragCoord)
 {
+    vec2 p,q;
+    vec3 col;
+    vec3 tot = vec3(0);
+    time = iFrame/10.;
+#if AA>1
+    for (int m = 0; m < AA; m++)
+        for (int n = 0; n < AA; n++)
+        {
+            vec2 o = vec2(float(m), float(n)) / float(AA) - 0.5;
+            p = (-iResolution.xy + 2.0 * (fragCoord + o)) / iResolution.y;
+#else    
+    p = (-iResolution.xy + 2.0 * fragCoord) / iResolution.y;
+#endif
+
     seed = float(iFrame) + iResolution.y * fragCoord.x / iResolution.x + fragCoord.y / iResolution.y;
 
 
-    vec2 p = (fragCoord) / iResolution.xy; // (-iResolution.xy + 2.0 * (fragCoord + offset)) / iResolution.y;
+    //vec2 p = (fragCoord) / iResolution.xy; // (-iResolution.xy + 2.0 * (fragCoord + offset)) / iResolution.y;
 
     // origin is at the topleft corner for hlsl
     p.y = 1. - p.y;
-    vec2 q = p;
-    p = 2. * p - 1.;
-    p.x *= iResolution.x / iResolution.y;
 
-    vec3 ro = vec3(RayOrigin.x, RayOrigin.y, RayOrigin.z);
-    vec3 ta = vec3(RayTarget.x, RayTarget.y, RayTarget.z);
+    q = fragCoord / iResolution.xy;
+    //p = 2. * p - 1.;
+    //p.x *= iResolution.x / iResolution.y;
+
+    //vec3 ro = vec3(RayOrigin.x, RayOrigin.y, RayOrigin.z);
+    //vec3 ta = vec3(RayTarget.x, RayTarget.y, RayTarget.z);
+
+    vec3 ro = vec3(8.56,13.3,-43.22);
+    ro.z -= time*20.;
+    vec3 ta = ro + vec3(.02, 12.88 - 13.3, -44.12 + 43.22); ///vec3(8.58, 12.88, -44.12);
     vec3 forward = normalize(ta - ro);
     vec3 right = normalize(cross(forward, UpVector));
     //vec3 right = normalize(cross(UpVector, forward));
@@ -934,13 +984,18 @@ vec4 mainImage(vec2 fragCoord)
     vec3 rd = normalize(p.x * right + p.y * up + 2.3 * forward);
 
 
-    vec2 interp = fragCoord.xy / iResolution.xy;
+#if PANARAMA 
+#if AA>1
+    vec2 interp = (fragCoord.xy+o) / iResolution.xy;
+#else
+    vec2 interp = (fragCoord.xy) / iResolution.xy;
+#endif
     //Mouse coordinates in [-1, 1] range
     //vec2 mp = iMouse.xy / iResolution.xy * vec2(2.0) + vec2(1.0);    
     vec2 mp = vec2(0);
 
-    interp.y = 1.0 - interp.y;
-    mp.y = 1.0 - mp.y;
+    //interp.y = 1.0 - interp.y;
+    //mp.y = 1.0 - mp.y;
 
     //360 degrees around the x-axis, 180 degrees on the y-axis
     //The frustum can be split into several parts:
@@ -956,16 +1011,19 @@ vec4 mainImage(vec2 fragCoord)
     float vOffset = (PI - fovY) * 0.5;
     float hAngle = hOffset + interp.x * fovX;
     float vAngle = vOffset + interp.y * fovY;
-    vec3 n;
-    n.x = sin(vAngle) * sin(hAngle);
-    n.y = cos(vAngle);
-    n.z = sin(vAngle) * cos(hAngle);
+    vec3 nn;
+    nn.x = sin(vAngle) * sin(hAngle);
+    nn.y = cos(vAngle);
+    nn.z = sin(vAngle) * cos(hAngle);
 
     //Normal pitch-yaw camera controlled with the mouse
-   // rd = rotY(mp.x * 2.0 * PI) * rotX(mp.y * 2.0 * PI) * n;
+    //rd = rotY(mp.x * 2.0 * PI) * rotX(mp.y * 2.0 * PI) * nn;
+    //rd = mul(mul(rotY(mp.x * 2.0 * PI), rotX(mp.y * 2.0 * PI)), nn);
+    rd = mul(rotY(mp.x * 2.0 * PI), mul(rotX(mp.y * 2.0 * PI), nn));
+#endif
 
 
-    vec3 col = vec3(0.6, 0.8, 1.1);
+    col = vec3(0.6, 0.8, 1.1);
 
     float t = 0.;
 
@@ -1006,6 +1064,26 @@ vec4 mainImage(vec2 fragCoord)
     ////float noi = noise(p*10.);
     ////float noi = hash12(p * 5.);
     //col = vec3(1) * noi;
+
+
+    //float c = hash12(q*20., 1.);
+    //float a = hash12(q*20., 1.);
+    //float b = hash12(q * 60.,  3.);
+    //col = vec3(1) * a;
+
+
+    //float a = voronoi(p*10.).x;
+    //col = vec3(1.) * a;
+
+
+
+    tot += col;
+#if AA>1
+    }
+    tot /= float(AA * AA);
+
+    col = tot;
+#endif
 
     col = tonemap(col);
     col = pow(clamp(col, 0.0, 1.0), vec3(0.45));
