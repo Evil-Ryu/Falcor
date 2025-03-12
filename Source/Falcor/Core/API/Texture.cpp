@@ -343,6 +343,8 @@ namespace Falcor
         };
 
         Threading::dispatchTask(func);
+        // limin: async is buggy, may get garbage capture
+        Threading::finish();
     }
 
     void Texture::uploadInitData(const void* pData, bool autoGenMips)

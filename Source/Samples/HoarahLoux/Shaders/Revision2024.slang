@@ -25,6 +25,17 @@ float mod(float x, float y)
     return x - y * floor(x / y);
 }
 
+vec2 mod(vec2 x, float y)
+{
+    return vec2(mod(x.x, y), mod(x.y, y));
+}
+
+vec3 mod(vec3 x, float y)
+{
+    return vec3(mod(x.x, y), mod(x.y, y), mod(x.z, y));
+}
+
+
 cbuffer ToyCB
 {
     float2 iResolution;
@@ -491,8 +502,7 @@ vec2 map(vec3 p)
 #endif
 
     p.xz -= 248.;
-    p.x = mod(p.x, 500.) - 250.;
-    p.z = mod(p.z, 500.) - 250.;
+    p.xz = mod(p.xz, 500.) - 250.;
     p.y += 0.55;
     res2 =vec2( vcylinder(p + vec3(0, 14.35, 0), 10., 50.), MAT_DARKMETAL);
 
@@ -518,7 +528,7 @@ vec2 map(vec3 p)
 
 //#endif
     // gun
-    p = op.yzx-ro.yzx+vec3(.4,-.6, .5);
+    p = op.yzx-ro.yzx+vec3(.4,-.5, .5);
     rot22(p.yz, -.1);
     res2 = gun(p * 5., 0.);
     res2.x /= 5.;
@@ -574,8 +584,7 @@ void getMaterial(float id, vec3 p, inout vec3 n, out vec3 albedo, out vec3 emiss
     {
         //albedo = vec3(.4, .0, .0);
         vec3 q = p;
-        q.x = mod(q.x, 2.) - 1.;
-        q.z = mod(q.z, 2.) - 1.;
+        q.xz = mod(q.xz, 2.) - 1.;
         q.z += 0.5;
         albedo = mix(vec3(.01), vec3(.7,.1,.1), smoothstep(.1, .11, length(q.xz) - .3));
         roughness = 0.4;
@@ -591,6 +600,7 @@ void getMaterial(float id, vec3 p, inout vec3 n, out vec3 albedo, out vec3 emiss
         //float ff = fbm(p * vec3(1, 1e3, 1));
         //ff=smoothstep(.5, .6, ff);
         //emissive = mix(emissive, firecolor(.8).zyx*1., min(1., ff));
+        //albedo = mix(albedo, firecolor(.8).zyx*1., min(1., ff));
 
 
         // scratch
@@ -770,7 +780,8 @@ vec3 getBackGround(vec3 rd, float t)
     rd += fbm(rd * 9.) * .5;
 
     vec3 p = ro + FAR * rd;
-    vec3 sky = 3.*mix(firecolor(.2), firecolor(.8).zxy, max(0.,fbm(p * .01)-.3));
+    vec3 sky = 2.*mix(firecolor(.2), firecolor(.8).zxy, max(0.,fbm(p * .01)-.3));
+    //vec3 sky = 2.*mix(firecolor(.2), firecolor(.8).xyz, max(0.,fbm(p * .01)-.3));
     sky *= smoothstep(-90., 500., p.y);
     //sum.xyz = mix(sum.xyz, skyCol * 0.1, 1. - smoothstep(-1., 400., (ro + 2000. * rd).y));
     //sky += 10.75 * sunCol * pow(clamp(dot(sunDir, rd), 0.0, 1.0), 10.0);
@@ -783,8 +794,6 @@ vec3 scene(vec2 uv)
 {
     vec3 throughput = vec3(1.), Lo = vec3(0), pos, q, n, albedo, nextRd, direct, emissive;
     float roughness, metallic;
-
-   
 
     //return sky;
     // 
@@ -918,7 +927,7 @@ vec4 mainImage(vec2 fragCoord)
     //vec3 up = normalize(cross(forward, right));
     vec3 up = normalize(cross(right, forward));
 
-    rd = normalize(p.x * right + p.y * up + 2.3 * forward);
+    rd = normalize(p.x * right + p.y * up + 1.5 * forward);
 
     vec3 finalCol = scene(p);
     rot22(p, PI/4.);

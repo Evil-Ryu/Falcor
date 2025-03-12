@@ -3,13 +3,23 @@
 
 #define MAX_PASSES 5
 #define MAX_CONTROLLABLE_VARS 5
-//#define DEFAULT_WIDTH 1280
-//#define DEFAULT_HEIGHT 720
-#define DEFAULT_WIDTH 2560
-#define DEFAULT_HEIGHT 1440
+
+//#define FBO_WIDTH 2560
+//#define FBO_HEIGHT 1440
+
+#define FBO_WIDTH 1280
+#define FBO_HEIGHT 720
+
+#define DEFAULT_WIDTH 1280
+#define DEFAULT_HEIGHT 720
+//#define DEFAULT_WIDTH 2560
+//#define DEFAULT_HEIGHT 1440
 
 //#define DEFAULT_WIDTH 1024
 //#define DEFAULT_HEIGHT 1024
+
+//#define IMAGES_TO_CAPTURE (25*30)
+#define IMAGES_TO_CAPTURE (1)
 
 
 static std::string getFilenameFromPath(const std::string& path)
@@ -51,8 +61,15 @@ void ShaderEditor::resetCamera()
    
     //camera->setPosition(float3(0, 0, -3));
     //camera->setTarget(float3(0,0,0));
-    camera->setPosition(float3(8.9, 6.8, -40.));
-    camera->setTarget(float3(8.6, 6.7, -39));
+
+    //camera->setPosition(float3(8.9, 6.8, -40.));
+    //camera->setTarget(float3(8.6, 6.7, -39));
+
+
+    camera->setPosition(float3(4.8, 1.2, -26));
+    camera->setTarget(float3(4.7, 1.3, -25));
+    
+
     // for skybox
     /*camera->setPosition(float3(6.64, 10., -1.79));
     camera->setTarget(float3(6.53, 10.,-2.8));*/
@@ -137,7 +154,7 @@ void ShaderEditor::createFbos(uint32_t width, uint32_t height)
 
 void ShaderEditor::createDebugResources()
 {
-    mDebugTexture = Texture::create2D(DEFAULT_WIDTH, DEFAULT_HEIGHT, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+    mDebugTexture = Texture::create2D(FBO_WIDTH, FBO_WIDTH, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
 }
 
 void ShaderEditor::onLoad(RenderContext* pRenderContext)
@@ -162,8 +179,8 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
 
     // Load shaders
     mPasses.resize(MAX_PASSES);
-    //std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Revision2024.slang";
-    std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Ocean2025.slang";
+    std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Revision2024.slang";
+    //std::string path0Str = "E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Ocean2025.slang";
     mPasses[0].mPass = FullScreenPass::create(path0Str);
     mPasses[0].mShaderPath = getFilenameFromPath(path0Str);
 
@@ -172,7 +189,7 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
     mPasses[1].mShaderPath = getFilenameFromPath(path1Str);
 
 
-    createFbos(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+    createFbos(FBO_WIDTH, FBO_HEIGHT);
 
     // shader constants that can be tweaked through gui
     mControllableVars.resize(MAX_CONTROLLABLE_VARS);
@@ -182,6 +199,13 @@ void ShaderEditor::onLoad(RenderContext* pRenderContext)
     mClearPass = FullScreenPass::create("E:/work/Falcor/Source/Samples/HoarahLoux/Shaders/Internal/Clear.ps.slang");
 
 
+    // fbo used for fbo capture
+    const ResourceFormat colorFormat = ResourceFormat::RGBA8Unorm; 
+    Fbo::Desc capturefboDesc;
+    capturefboDesc.setColorTarget(0, colorFormat);
+    mCaptureFbo = Fbo::create2D(FBO_WIDTH, FBO_HEIGHT, capturefboDesc, 1, Texture::kMaxPossible);
+
+    
     // camera
     mCameras.push_back(Camera::create());
     resetCamera();
@@ -361,6 +385,20 @@ void ShaderEditor::onFrameRender(RenderContext* pRenderContext, const Fbo::Share
     // blit is not working with mipmapped textures
     //pRenderContext->blit(passOutput->getSRV(), pTargetFbo->getRenderTargetView(0));
 
+
+    // Fbo color0 captured to disk
+    if (mIsCaptureFbo && lastPass >=0 && mNumImagesToCapture-- > 0)
+    {
+        // convert float rgba to unorm in order to output to image file
+        executeBlitPass(pRenderContext, passOutput, mCaptureFbo, width, height);
+        captureFbo(mCaptureFbo, "o", "E:/work/Falcor/Source/Samples/HoarahLoux/Captures");
+        if (mNumImagesToCapture == 0)
+        {
+            mIsCaptureFbo = false;
+            gpFramework->pauseRenderer(!gpFramework->isRendererPaused());
+        }
+    }
+
     executeBlitPass(pRenderContext, passOutput, pTargetFbo, width, height);
 
     mAccumulationRestart = false;
@@ -492,6 +530,19 @@ void ShaderEditor::onGuiRender(Gui* pGui)
     w.text(mTexPath, true);
 }
 
+std::filesystem::path ShaderEditor::captureFbo(const Fbo::SharedPtr& Fbo, const std::string explicitFilename, const std::filesystem::path explicitDirectory)
+{
+
+    std::string filename = explicitFilename.empty() ? getExecutableName() : explicitFilename;
+    std::filesystem::path directory = explicitDirectory.empty() ? getExecutableDirectory() : explicitDirectory;
+
+    std::filesystem::path path = findAvailableFilename(filename, directory, "png");
+    Texture::SharedPtr pTexture;
+    pTexture = Fbo->getColorTexture(0);
+    pTexture->captureToFile(0, 0, path);
+    return path;
+}
+
 
 void ShaderEditor::onShutdown()
 {
@@ -528,6 +579,12 @@ bool ShaderEditor::onKeyEvent(const KeyboardEvent& keyEvent)
             {
                 RotateCamera90AroundRight();
                 mAccumulationRestart = true;
+                break;
+            }
+            case Input::Key::L:
+            {
+                mIsCaptureFbo = true;
+                mNumImagesToCapture = IMAGES_TO_CAPTURE;
                 break;
             }
             
@@ -569,7 +626,7 @@ int main(int argc, char** argv)
     ShaderEditor::UniquePtr pRenderer = std::make_unique<ShaderEditor>();
     SampleConfig config;
     config.windowDesc.width = DEFAULT_WIDTH;
-    config.windowDesc.height = DEFAULT_HEIGHT;
+    config.windowDesc.height = DEFAULT_HEIGHT; 
     config.deviceDesc.enableVsync = true;
     config.windowDesc.resizableWindow = true;
     config.windowDesc.title = "ShaderEditor";

@@ -769,10 +769,10 @@ vec3 render_water(vec3 ro, vec3 rd, float t, vec2 fragCoord, vec3 sky)
         //+ voronoi(m2*pos.xz*8.+2.+iGlobalTime*2.).x*.15 
         + voronoi((pos.xz)*0.1).x * 1. * rnd;
 
-    foam = mix(foam * .01, foam, smoothstep(0.5, 2., n.y) * smoothstep(0.9, 2., pos.y));
+    foam = .3*mix(foam * .01, foam, smoothstep(0.5, 2., n.y) * smoothstep(0.9, 2., pos.y));
 
 
-    return col + scatterCol + speCol + foam * .2;
+    return col + scatterCol + speCol + foam;
 }
 
 
@@ -940,13 +940,13 @@ float deg2rad(float deg) {
 
 static vec4 faceColors[6];
 
-#define AA 1
+#define AA 4
 vec4 mainImage(vec2 fragCoord)
 {
     vec2 p,q;
     vec3 col;
     vec3 tot = vec3(0);
-    time = iFrame/10.;
+    time = iFrame/30.;
 #if AA>1
     for (int m = 0; m < AA; m++)
         for (int n = 0; n < AA; n++)

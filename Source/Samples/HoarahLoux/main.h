@@ -17,6 +17,7 @@ public:
     bool onKeyEvent(const KeyboardEvent& keyEvent) override;
     bool onMouseEvent(const MouseEvent& mouseEvent) override;
 
+    std::filesystem::path captureFbo(const Fbo::SharedPtr& Fbo, const std::string explicitFilename, const std::filesystem::path explicitDirectory);
     void onGuiRender(Gui* pGui);
 
 private:
@@ -44,7 +45,9 @@ private:
     bool mCameraDirty = false;
     bool mPrevCameraDirty = false;
     bool mAccumulationRestart = false;
-    bool mCaptureScreen = false;
+    bool mIsCaptureFbo = false;
+    int mNumImagesToCapture = 0;
+    Fbo::SharedPtr mCaptureFbo;
 
     Texture::SharedPtr mpTex;
     std::string mTexPath;

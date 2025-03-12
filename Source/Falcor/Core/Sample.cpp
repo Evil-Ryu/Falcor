@@ -498,7 +498,10 @@ namespace Falcor
 #endif
             // Capture video frame after UI is rendered
             if (captureVideoUI) captureVideoFrame();
-            if (mCaptureScreen) captureScreen();
+            // limin: capture for ocean
+            //if (mCaptureScreen) captureScreen();
+            if (mCaptureScreen) captureScreen("o", "E:/work/Falcor/Source/Samples/HoarahLoux/Captures");
+            // end limin
 
             {
                 FALCOR_PROFILE("present", Profiler::Flags::Internal);

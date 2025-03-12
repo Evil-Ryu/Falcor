@@ -24,11 +24,29 @@ vec3 tonemap(vec3 x)
 }
 
 
+vec3 ca(vec2 u) {
+    const int n = 5;
+    vec3 c = vec3(0);
+    float rf = 1, gf = 1, bf = 1;
+    for (int i = 0; i < n; ++i) {
+        c.r += iPass0Output.Sample(iChannel0Sampler, .5 + .5 * (u * rf)).r;
+        c.g += iPass0Output.Sample(iChannel0Sampler, .5 + .5 * (u * gf)).g;
+        c.b += iPass0Output.Sample(iChannel0Sampler, .5 + .5 * (u * bf)).b;
+        rf *= .9988;
+        gf *= .9982;
+        bf *= .996;
+    }
+    return c / n;
+}
+
+
+
 vec4 mainImage(vec2 fragCoord)
 {
     vec2 uv = fragCoord / iResolution;
 
     vec3 col = iPass0Output.Load(vec3(fragCoord, 0)).xyz;
+    //vec3 col = ca(uv*2.-1.);
     /*if (iFrame > 0.)
     {
         vec4 prevCol = iPass0Output.Load(vec3(fragCoord,0));
